@@ -32,8 +32,9 @@ final class UpdateChecker {
 
     // MARK: - Init
 
-    init(preferences: Preferences = .shared) {
-        self.preferences = preferences
+    init(preferences: Preferences? = nil) {
+        // See EspansoProcessManager.init for why this isn't a default argument.
+        self.preferences = preferences ?? .shared
         self.currentVersion =
             Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }

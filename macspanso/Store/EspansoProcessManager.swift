@@ -26,10 +26,12 @@ final class EspansoProcessManager: ObservableObject {
     /// Pass a custom `espansoPath` for testing; leave nil to auto-locate via
     /// Homebrew / PATH. Pass `preferences` backed by a throwaway suite so tests
     /// don't share persisted snooze state.
-    init(espansoPath: String? = nil, preferences: Preferences = .shared) {
+    init(espansoPath: String? = nil, preferences: Preferences? = nil) {
         let path = espansoPath ?? EspansoProcessManager.locateEspanso() ?? ""
         self.espansoPath = path
-        self.preferences = preferences
+        // Resolved here rather than as a default argument: default arguments
+        // are evaluated outside the actor, and `shared` is main-actor bound.
+        self.preferences = preferences ?? .shared
         if path.isEmpty { state = .notInstalled }
         restorePersistedSnooze()
     }
