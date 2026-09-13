@@ -270,7 +270,9 @@ private struct BulkActionPanel: View {
 
 private struct EmptyStateView: View {
     /// The hotkey is user-configurable (Settings → Shortcuts) and may be
-    /// cleared entirely, so the hint reads the live value.
+    /// cleared entirely, so the hint reads the stored value at render time.
+    /// It is not observed: changing the shortcut while this empty state is
+    /// on screen leaves the hint stale until the next render.
     private static var newMatchHint: String {
         if let shortcut = KeyboardShortcuts.getShortcut(for: .newMatch) {
             return "press \(shortcut)"

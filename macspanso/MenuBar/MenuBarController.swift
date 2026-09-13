@@ -448,6 +448,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// the Match Manager does — it's a utility, not a place the user lives.
     @objc private func openSettings() {
         NSApp.activate(ignoringOtherApps: true)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        // The selector is SwiftUI's private responder for the Settings scene.
+        // It has held since macOS 13, but nothing guarantees it; a failed
+        // dispatch must not be a silent no-op on a menu click.
+        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
+            NSLog("Settings: no responder handled showSettingsWindow:")
+        }
     }
 }
