@@ -52,13 +52,13 @@ jobs:
         run: |
           KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
 
-          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          security import certificate.p12 \
+          security import "$RUNNER_TEMP/certificate.p12" \
             -k "$KEYCHAIN_PATH" \
             -P "$MACOS_CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign \
@@ -75,7 +75,7 @@ jobs:
           # Verify the certificate was imported
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
-          rm certificate.p12
+          rm "$RUNNER_TEMP/certificate.p12"
 
       # ── Version ────────────────────────────────────────────────────────────
 
@@ -83,6 +83,10 @@ jobs:
         id: version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Refusing to release: tag must match vX.Y.Z (got: '$GITHUB_REF_NAME')" >&2
+            exit 1
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "DMG=macspanso-$VERSION.dmg" >> "$GITHUB_OUTPUT"
 
@@ -159,18 +163,23 @@ jobs:
           generate_release_notes: true
 
       # ── Update Homebrew tap ────────────────────────────────────────────────
-      # Required secret: TAP_TOKEN — GitHub PAT with repo scope for jeffcaldwellca/homebrew-tap
+      # Required secret: TAP_TOKEN — fine-grained GitHub PAT scoped to
+      # jeffcaldwellca/homebrew-tap with contents:write permission.
+      # The token is passed to the checkout action (never on a command line);
+      # persisted credentials let the later `git push` authenticate.
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: jeffcaldwellca/homebrew-tap
+          token: ${{ secrets.TAP_TOKEN }}
+          path: tap
 
       - name: Update Homebrew tap
         env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
           VERSION: ${{ steps.version.outputs.VERSION }}
           SHA256: ${{ steps.sha.outputs.SHA256 }}
         run: |
-          git clone \
-            "https://x-access-token:$TAP_TOKEN@github.com/jeffcaldwellca/homebrew-tap.git" \
-            tap
-
           cd tap
 
           sed -i '' "s/version \".*\"/version \"$VERSION\"/" Casks/macspanso.rb
