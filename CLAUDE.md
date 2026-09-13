@@ -94,7 +94,7 @@ Both are zips of the match directory. Backups are user-initiated to a chosen pat
 
 ### Preferences, launch at login, hotkeys
 
-`Preferences` (`Store/Preferences.swift`) is the only place that names a `UserDefaults` key; the one `@AppStorage` in the codebase (`MatchListView`'s sort order) binds through `Preferences.Key`. The key strings predate it and are pinned by `PreferencesTests.testKeysAreFrozen` — renaming one orphans every user's stored value. It takes an injectable `UserDefaults`; tests use a throwaway suite so they never share `.standard`. Consumers (`EspansoProcessManager`, `UpdateChecker`) accept an optional `Preferences` and fall back to `.shared` *inside* the init body: a `= .shared` default argument is evaluated outside the main actor and the toolchain flags it.
+`Preferences` (`Store/Preferences.swift`) is the only place that names a `UserDefaults` key; the one `@AppStorage` in the codebase (`MatchListView`'s sort order) binds through `Preferences.Key`. The key strings predate it and are pinned by `PreferencesTests.testKeysAreFrozen` — renaming one orphans every user's stored value. It takes an injectable `UserDefaults`; tests use a throwaway suite so they never share `.standard`. Consumers (`EspansoProcessManager`, `UpdateChecker`) accept an optional `Preferences` and fall back to `.shared` *inside* the init body: a `= .shared` default argument is evaluated outside the main actor and the toolchain flags it. `UpdateChecker` also takes a `fetch` closure and a `currentVersion`, which is how `UpdateCheckerTests` exercises the automatic-check gate without touching GitHub.
 
 Two things are deliberately not in `Preferences`:
 
@@ -111,7 +111,7 @@ The Settings window is the SwiftUI `Settings` scene (`SettingsView`), not a seco
 
 ## Testing conventions
 
-XCTest, `@testable import macspanso`. Classes that touch the actor-isolated types are `@MainActor` (`EspansoConfigStoreTests`, `BackupManagerTests`, `EspansoProcessManagerTests`, `PreferencesTests`, `TriggerConflictTests`, `RoundTripPreservationTests`); the pure-logic ones are not (`MatchValidationTests`, `MatchExpanderTests`, `YAMLParsingTests`, `YAMLSerializationTests`, `TriggerModeTransitionTests`, `MatchManagerWindowPlacementTests`, `IDReassociationTests`). Tests build a real temp directory per test in `setUp` and write real YAML — there are no mocks or protocol seams. Most non-UI logic is reachable because the pure parts (`MatchValidator`, `MatchExpander`, `TriggerModeTransition`, `YAMLSerializer`, window placement, ID reassociation) are `static`/`nonisolated` and free of app state.
+XCTest, `@testable import macspanso`. Classes that touch the actor-isolated types are `@MainActor` (`EspansoConfigStoreTests`, `BackupManagerTests`, `EspansoProcessManagerTests`, `PreferencesTests`, `UpdateCheckerTests`, `TriggerConflictTests`, `RoundTripPreservationTests`); the pure-logic ones are not (`MatchValidationTests`, `MatchExpanderTests`, `YAMLParsingTests`, `YAMLSerializationTests`, `TriggerModeTransitionTests`, `MatchManagerWindowPlacementTests`, `IDReassociationTests`). Tests build a real temp directory per test in `setUp` and write real YAML — there are no mocks or protocol seams. Most non-UI logic is reachable because the pure parts (`MatchValidator`, `MatchExpander`, `TriggerModeTransition`, `YAMLSerializer`, window placement, ID reassociation) are `static`/`nonisolated` and free of app state.
 
 ## Notes
 

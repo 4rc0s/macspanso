@@ -26,17 +26,26 @@ final class UpdateChecker {
         string: "https://api.github.com/repos/jeffcaldwellca/macspanso/releases/latest"
     )!
 
+    /// Performs the HTTP request. The default is `URLSession.shared`; tests
+    /// inject a stub so the gate logic can be exercised without the network.
+    typealias Fetch = (URLRequest) async throws -> (Data, URLResponse)
+
     private let currentVersion: String
     private let preferences: Preferences
+    private let fetch: Fetch
     private var timer: Timer?
 
     // MARK: - Init
 
-    init(preferences: Preferences? = nil) {
+    init(preferences: Preferences? = nil,
+         currentVersion: String? = nil,
+         fetch: Fetch? = nil) {
         // See EspansoProcessManager.init for why this isn't a default argument.
         self.preferences = preferences ?? .shared
-        self.currentVersion =
-            Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        self.currentVersion = currentVersion
+            ?? Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            ?? "0.0.0"
+        self.fetch = fetch ?? { try await URLSession.shared.data(for: $0) }
     }
 
     deinit { timer?.invalidate() }
@@ -44,7 +53,7 @@ final class UpdateChecker {
     // MARK: - Public API
 
     /// Outcome of a single check, for user-facing feedback.
-    enum CheckOutcome {
+    enum CheckOutcome: Equatable {
         case updateAvailable(String)   // newer remote version
         case upToDate(String)          // current version is latest
         case failed                    // network / parse failure
@@ -98,7 +107,7 @@ final class UpdateChecker {
         request.setValue("macspanso/\(currentVersion)",  forHTTPHeaderField: "User-Agent")
 
         guard
-            let (data, response) = try? await URLSession.shared.data(for: request),
+            let (data, response) = try? await fetch(request),
             let http = response as? HTTPURLResponse, http.statusCode == 200
         else { return .failed }
 

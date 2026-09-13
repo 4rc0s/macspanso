@@ -45,6 +45,7 @@
 		9BD8321A9E830D64DF820D8A /* MatchExpanderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB60FA98EE57D48527FB2EA /* MatchExpanderTests.swift */; };
 		A2B847F01BE3904CB019054D /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = F5A008572CFB07101C8342C3 /* Yams */; };
 		AE980D1D7FFA81D68D8AD70D /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB71F015C7A53C0B1885F3B1 /* Preferences.swift */; };
+		B457D340C538B6B03F7DE4A6 /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24ABEB6A01637B7E953AF7AA /* UpdateCheckerTests.swift */; };
 		B9EB1F43D83924865AD815F6 /* BackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4220130AFAC8146CE4396C7 /* BackupManager.swift */; };
 		BFD632A8CEC8466D2AABA911 /* MacspansoIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46ACC94088C590B28D8D76AA /* MacspansoIntents.swift */; };
 		C72420319FBF0791E1119040 /* ViewStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D7EBB169B203D1E23937442 /* ViewStubs.swift */; };
@@ -83,6 +84,7 @@
 		1B9CF37AC7F49D20F5E7DFE9 /* EspansoMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EspansoMatch.swift; sourceTree = "<group>"; };
 		1BA30315FCC8E232EF0619A7 /* EspansoVar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EspansoVar.swift; sourceTree = "<group>"; };
 		1FB8530FDA5F7A4FF993B443 /* FileWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileWatcher.swift; sourceTree = "<group>"; };
+		24ABEB6A01637B7E953AF7AA /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
 		2CB0240EC4BC5EA2A9BDDBDB /* TriggerModeTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriggerModeTransitionTests.swift; sourceTree = "<group>"; };
 		2D9311AD3CA4F25DF3E49BF7 /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
 		35DBB64F4559E50573FEBB39 /* macspansoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = macspansoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -190,6 +192,7 @@
 				B14B1A11DF46F0BD7EB11BEB /* RoundTripPreservationTests.swift */,
 				4FFDCF28DBEF79CDB9D20962 /* TriggerConflictTests.swift */,
 				2CB0240EC4BC5EA2A9BDDBDB /* TriggerModeTransitionTests.swift */,
+				24ABEB6A01637B7E953AF7AA /* UpdateCheckerTests.swift */,
 				BBB31B0A80C7E4AB1B688D07 /* YAMLParsingTests.swift */,
 				55A823094350043793627A9A /* YAMLSerializationTests.swift */,
 			);
@@ -436,6 +439,7 @@
 				1CC6166FFF8C6E24CC4B4AB9 /* RoundTripPreservationTests.swift in Sources */,
 				DEEE48DB738AA4967926024C /* TriggerConflictTests.swift in Sources */,
 				8254DD54CA576CFB4230E019 /* TriggerModeTransitionTests.swift in Sources */,
+				B457D340C538B6B03F7DE4A6 /* UpdateCheckerTests.swift in Sources */,
 				3707A90CFF568DAEDE178BF0 /* YAMLParsingTests.swift in Sources */,
 				9994F33BE0354A89D826B906 /* YAMLSerializationTests.swift in Sources */,
 			);
