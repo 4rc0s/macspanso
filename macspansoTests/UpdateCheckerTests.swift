@@ -25,8 +25,6 @@ final class UpdateCheckerTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private static let interval: TimeInterval = 86_400
-
     /// A checker whose fetch fulfils `expectation` and answers with `tag` at
     /// `status`. `expectation` should be inverted for the "must not fetch"
     /// cases so the test fails if a request is attempted.
@@ -71,11 +69,16 @@ final class UpdateCheckerTests: XCTestCase {
     func testStaleCheckFetchesWhenNeverChecked() async {
         let fetched = oneFetch()
         let checker = makeChecker(fulfilling: fetched)
+        // The fetch stub fulfils on entry, before the checker has written
+        // anything. onStateChange fires after the last-check date, the version
+        // and the availability flag are all set, so waiting on it makes the
+        // assertions below ordered rather than merely likely to win a race.
+        let settled = expectation(description: "state published")
+        checker.onStateChange = { settled.fulfill() }
 
         checker.checkIfStale()
 
-        await fulfillment(of: [fetched], timeout: 1)
-        await Task.yield()
+        await fulfillment(of: [fetched, settled], timeout: 1)
         XCTAssertNotNil(prefs.lastUpdateCheck, "a successful fetch stamps the last-check date")
         XCTAssertEqual(checker.latestVersion, "9.9.9")
         XCTAssertTrue(checker.updateAvailable)
@@ -92,7 +95,7 @@ final class UpdateCheckerTests: XCTestCase {
     }
 
     func testStaleCheckFetchesPastTheInterval() async {
-        prefs.lastUpdateCheck = Date(timeIntervalSinceNow: -(Self.interval + 60))
+        prefs.lastUpdateCheck = Date(timeIntervalSinceNow: -(UpdateChecker.checkInterval + 60))
         let fetched = oneFetch()
         let checker = makeChecker(fulfilling: fetched)
 

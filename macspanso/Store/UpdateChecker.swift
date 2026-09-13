@@ -20,7 +20,9 @@ final class UpdateChecker {
 
     // MARK: - Private
 
-    private static let checkInterval: TimeInterval = 86_400   // 24 hours
+    /// 24 hours. Internal rather than private so `UpdateCheckerTests` can
+    /// build its fixtures from the real value instead of restating it.
+    static let checkInterval: TimeInterval = 86_400
 
     private static let releasesURL = URL(
         string: "https://api.github.com/repos/jeffcaldwellca/macspanso/releases/latest"
