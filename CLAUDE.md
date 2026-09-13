@@ -98,7 +98,7 @@ Both are zips of the match directory. Backups are user-initiated to a chosen pat
 
 Two things are deliberately not in `Preferences`:
 
-- **Launch at Login** is never persisted. `LoginItem` (`App/LoginItem.swift`) reads `SMAppService.mainApp.status` live every time it is shown, because the user can flip it in System Settings › Login Items at any moment. It also surfaces `.requiresApproval`, which reads as "off" without that hint.
+- **Launch at Login** is never persisted. `LoginItem.shared` (`App/LoginItem.swift`) reads `SMAppService.mainApp.status` live every time it is shown, because the user can flip it in System Settings › Login Items at any moment. It also surfaces `.requiresApproval`, which reads as "off" without that hint. It is a single shared instance because the status menu and the Settings window show the same toggle and must see each other's changes.
 - **Global hotkeys** are owned by the `KeyboardShortcuts` package. Names and initial combos live in `App/Shortcuts.swift`; storage is the package's own defaults keys. The status-menu items get their key equivalents from `setShortcut(for:)` rather than a hardcoded copy, and the global registrations are disabled while the menu is open (`menuWillOpen`/`menuDidClose`) so a combo doesn't fire twice. Anything that shows a combo to the user must read `KeyboardShortcuts.getShortcut(for:)` — it can be changed or cleared.
 
 ### Menu-bar and window presence
@@ -107,7 +107,7 @@ Two things are deliberately not in `Preferences`:
 
 Focus commands (new match, about) reach SwiftUI through `NotificationCenter` posted one run-loop cycle late, so the view's `.onReceive` is wired up before the notification fires.
 
-The Settings window is the SwiftUI `Settings` scene (`SettingsView`), not a second window controller: that gives ⌘,, toolbar tabs, and frame autosave for free and guarantees one instance. The status menu opens it with `NSApp.activate(ignoringOtherApps: true)` followed by `sendAction(Selector(("showSettingsWindow:")))` — activation first, or an accessory app's window can open behind the frontmost app. It deliberately does not flip the activation policy; only the Match Manager does that. Because a `Settings` scene cannot be handed dependencies, `SettingsView` reaches state through `Preferences.shared`, `LoginItem`, the package, and `(NSApp.delegate as? AppDelegate)?.updateChecker` for the one action that needs it — keep it that way rather than threading the store in.
+The Settings window is the SwiftUI `Settings` scene (`SettingsView`), not a second window controller: that gives ⌘,, toolbar tabs, and frame autosave for free and guarantees one instance. The status menu opens it with `NSApp.activate(ignoringOtherApps: true)` followed by `sendAction(Selector(("showSettingsWindow:")))` — activation first, or an accessory app's window can open behind the frontmost app. It deliberately does not flip the activation policy; only the Match Manager does that. Because a `Settings` scene cannot be handed dependencies, `SettingsView` reaches state through `Preferences.shared`, `LoginItem.shared`, the package, and `(NSApp.delegate as? AppDelegate)?.updateChecker` for the one action that needs it — keep it that way rather than threading the store in.
 
 ## Testing conventions
 

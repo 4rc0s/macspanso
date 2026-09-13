@@ -26,7 +26,7 @@ struct SettingsView: View {
 
 private struct GeneralSettingsTab: View {
     @ObservedObject private var preferences = Preferences.shared
-    @StateObject private var loginItem = LoginItem()
+    @ObservedObject private var loginItem = LoginItem.shared
 
     var body: some View {
         Form {

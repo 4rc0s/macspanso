@@ -14,7 +14,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let backupManager: BackupManager
     private let updateChecker: UpdateChecker
     private var didCreateSessionSnapshot = false
-    private let loginItem = LoginItem()
+    private let loginItem = LoginItem.shared
 
     private static let espansoURL = URL(string: "https://espanso.org")!
     private static let releasesURL = URL(string: "https://github.com/jeffcaldwellca/macspanso/releases/latest")!

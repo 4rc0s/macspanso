@@ -8,8 +8,16 @@ import ServiceManagement
 /// flip this in System Settings › Login Items at any time, so nothing here is
 /// ever cached in `Preferences`. Call `refresh()` whenever the value is about
 /// to be shown.
+///
+/// One instance on purpose. Two would each read the system truthfully but
+/// never see each other's changes: toggling from the status menu while the
+/// Settings window is frontmost doesn't deactivate the app, so the view's
+/// refresh hooks never fire and its toggle stays stale. Sharing the instance
+/// lets the menu's `refresh()` publish to the view as well.
 @MainActor
 final class LoginItem: ObservableObject {
+    static let shared = LoginItem()
+
     @Published private(set) var status: SMAppService.Status = SMAppService.mainApp.status
     @Published private(set) var lastError: String?
 

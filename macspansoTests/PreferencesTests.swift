@@ -23,13 +23,15 @@ final class PreferencesTests: XCTestCase {
 
     // MARK: - Keys
 
-    /// These strings predate `Preferences`. Renaming one orphans every
-    /// existing user's stored value, so the literals are pinned here.
+    /// Renaming a key orphans every existing user's stored value, so the
+    /// literals are pinned here. Every key belongs in this list once it has
+    /// shipped, not just the ones that predate `Preferences`.
     func testKeysAreFrozen() {
         XCTAssertEqual(Preferences.Key.snoozeUntil,             "macspanso.snoozeUntil")
         XCTAssertEqual(Preferences.Key.lastUpdateCheck,         "updateChecker.lastCheckDate")
         XCTAssertEqual(Preferences.Key.lastDestinationFilePath, "macspanso.lastDestinationFilePath")
         XCTAssertEqual(Preferences.Key.listSort,                "macspanso.listSort")
+        XCTAssertEqual(Preferences.Key.automaticUpdateChecks,   "macspanso.automaticUpdateChecks")
     }
 
     // MARK: - Defaults and round-trips
