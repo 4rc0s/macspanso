@@ -57,7 +57,7 @@ final class GlobalHotkeyController {
     private func register(action: Action, keyCode: UInt32,
                           modifiers: UInt32) -> EventHotKeyRef? {
         var ref: EventHotKeyRef?
-        var hotKeyID = EventHotKeyID(signature: 0x4D53_5053 /* 'MSPS' */, id: action.rawValue)
+        let hotKeyID = EventHotKeyID(signature: 0x4D53_5053 /* 'MSPS' */, id: action.rawValue)
         let status = RegisterEventHotKey(keyCode, modifiers, hotKeyID,
                                          GetApplicationEventTarget(), 0, &ref)
         if status != noErr {

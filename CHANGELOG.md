@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0] - 2026-09-13
+
+### Added
+- **System-wide hotkeys** — press **⌃⇧M** to open the Match Manager and **⌃⇧N** to start a new match, from any app, without opening the menu. They need no Accessibility or Input Monitoring permission, and they sit beside espanso's own ⌃⇧Space without colliding with it. These replace the old ⌘M / ⌘N menu shortcuts, which only worked while the menu bar menu was open.
+- **Match Manager in the Cmd-Tab switcher** — while its window is open, macspanso behaves as a regular app, so you can switch back to the Match Manager with Cmd-Tab and it appears in the Dock. It returns to menu-bar-only once the window closes.
+
+### Fixed
+- **Backups and restores could hang on large match directories** — `zip` and `unzip` print one line per entry, and once that output passed the 64 KB pipe buffer the child process blocked forever, freezing the export or restore. Output is now discarded and error output is drained before waiting, the same way espanso commands were fixed in 1.4.0.
+- **Restoring in replace mode left stale `.yaml` files behind** — cleanup only removed `.yml` files, so matches in `.yaml` files survived the restore and reappeared alongside the restored set. Both extensions espanso loads are now cleaned up; `packages/` is still never touched.
+- **Adding a match to an unparseable file wiped it** — a file whose YAML failed to parse holds nothing in memory, so writing a new match into it replaced everything already on disk. Adding to such a file is now refused with a message telling you to fix the YAML first, matching the protection that already covered moving matches between files.
+- **Failed imports and restores could leave the app showing matches that no longer existed** — if extraction failed partway, the match list kept displaying entries whose files had already been removed. The store now resyncs with disk before the error is reported.
+
 ## [1.4.1] - 2026-06-28
 
 ### Fixed
