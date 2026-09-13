@@ -31,6 +31,7 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(Preferences.Key.lastUpdateCheck,         "updateChecker.lastCheckDate")
         XCTAssertEqual(Preferences.Key.lastDestinationFilePath, "macspanso.lastDestinationFilePath")
         XCTAssertEqual(Preferences.Key.listSort,                "macspanso.listSort")
+        XCTAssertEqual(Preferences.Key.listGrouped,             "macspanso.listGrouped")
         XCTAssertEqual(Preferences.Key.automaticUpdateChecks,   "macspanso.automaticUpdateChecks")
     }
 
@@ -42,6 +43,19 @@ final class PreferencesTests: XCTestCase {
         // the persistent domain to prove nothing was written.
         XCTAssertNil(defaults.persistentDomain(forName: suiteName)?[Preferences.Key.automaticUpdateChecks],
                      "the default must come from the registration domain, not a stored value")
+    }
+
+    func testListGroupedDefaultsToTrue() {
+        XCTAssertTrue(prefs.listGrouped)
+        XCTAssertNil(defaults.persistentDomain(forName: suiteName)?[Preferences.Key.listGrouped],
+                     "the default must come from the registration domain, not a stored value")
+    }
+
+    func testListGroupedPersists() {
+        prefs.listGrouped = false
+        XCTAssertFalse(prefs.listGrouped)
+        XCTAssertFalse(Preferences(defaults: defaults).listGrouped,
+                       "a fresh instance over the same suite must see the stored value")
     }
 
     func testAutomaticUpdateChecksPersists() {

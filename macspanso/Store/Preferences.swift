@@ -23,6 +23,7 @@ final class Preferences: ObservableObject {
         static let lastUpdateCheck         = "updateChecker.lastCheckDate"
         static let lastDestinationFilePath = "macspanso.lastDestinationFilePath"
         static let listSort                = "macspanso.listSort"
+        static let listGrouped             = "macspanso.listGrouped"
         static let automaticUpdateChecks   = "macspanso.automaticUpdateChecks"
     }
 
@@ -31,7 +32,10 @@ final class Preferences: ObservableObject {
     /// Pass a throwaway suite in tests so they don't share `.standard`.
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        defaults.register(defaults: [Key.automaticUpdateChecks: true])
+        defaults.register(defaults: [
+            Key.automaticUpdateChecks: true,
+            Key.listGrouped: true,
+        ])
     }
 
     // MARK: - Settings the user controls
@@ -68,6 +72,13 @@ final class Preferences: ObservableObject {
     var listSortRaw: String? {
         get { defaults.string(forKey: Key.listSort) }
         set { set(newValue, for: Key.listSort) }
+    }
+
+    /// Whether the match list groups matches by file (default) or shows a
+    /// flat list. `MatchListView` binds this via `@AppStorage` using `Key.listGrouped`.
+    var listGrouped: Bool {
+        get { defaults.bool(forKey: Key.listGrouped) }
+        set { set(newValue, for: Key.listGrouped) }
     }
 
     // MARK: - Helpers

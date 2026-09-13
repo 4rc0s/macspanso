@@ -13,6 +13,7 @@
 		1CC6166FFF8C6E24CC4B4AB9 /* RoundTripPreservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B14B1A11DF46F0BD7EB11BEB /* RoundTripPreservationTests.swift */; };
 		1EFA438CA5AC5BE32547A12E /* EspansoProcessManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582A3F021D21611324D06406 /* EspansoProcessManagerTests.swift */; };
 		21805B927116698A7059F1F6 /* ExternalEditBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4998035434E6109CE059E65F /* ExternalEditBanner.swift */; };
+		2B99593B3C18D3C7178DFB4B /* FileGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E893D2826B30104C7EBC04C /* FileGroupingTests.swift */; };
 		2D5135290BE95A9F7DC59D33 /* EspansoProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F2E60463216EC9368B4ABC6 /* EspansoProcessManager.swift */; };
 		3675C46258E205B3A46814B7 /* TriggerModeTransition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142ED47EF8B3DEC59AE059EC /* TriggerModeTransition.swift */; };
 		3707A90CFF568DAEDE178BF0 /* YAMLParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB31B0A80C7E4AB1B688D07 /* YAMLParsingTests.swift */; };
@@ -100,6 +101,7 @@
 		582A3F021D21611324D06406 /* EspansoProcessManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EspansoProcessManagerTests.swift; sourceTree = "<group>"; };
 		617A9D23BF90860C85909EC2 /* BackupManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupManagerTests.swift; sourceTree = "<group>"; };
 		6750794A19508E640DB18607 /* MatchManagerWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchManagerWindow.swift; sourceTree = "<group>"; };
+		6E893D2826B30104C7EBC04C /* FileGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileGroupingTests.swift; sourceTree = "<group>"; };
 		7079D876C9FD81D8E9087C4C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		70FA31CC02022AE2267674F3 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		7D101A2C6D185C3EC5C0BC8D /* macspanso.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = macspanso.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -186,6 +188,7 @@
 				617A9D23BF90860C85909EC2 /* BackupManagerTests.swift */,
 				F5970F4B2C15BC128D9A8456 /* EspansoConfigStoreTests.swift */,
 				582A3F021D21611324D06406 /* EspansoProcessManagerTests.swift */,
+				6E893D2826B30104C7EBC04C /* FileGroupingTests.swift */,
 				C313B2ED2B094696683AD0D1 /* IDReassociationTests.swift */,
 				FCB60FA98EE57D48527FB2EA /* MatchExpanderTests.swift */,
 				97856E02AB8BDCBA8D68DF7E /* MatchManagerWindowPlacementTests.swift */,
@@ -434,6 +437,7 @@
 				61EDF930BF4D96D560F18CF8 /* BackupManagerTests.swift in Sources */,
 				8E6B0EA0BA6FB4A43B1AB88E /* EspansoConfigStoreTests.swift in Sources */,
 				1EFA438CA5AC5BE32547A12E /* EspansoProcessManagerTests.swift in Sources */,
+				2B99593B3C18D3C7178DFB4B /* FileGroupingTests.swift in Sources */,
 				91C4437F5DD9899E51510D52 /* IDReassociationTests.swift in Sources */,
 				9BD8321A9E830D64DF820D8A /* MatchExpanderTests.swift in Sources */,
 				905D298986BDFED83E222004 /* MatchManagerWindowPlacementTests.swift in Sources */,

@@ -12,7 +12,6 @@ struct MatchManagerView: View {
     @State private var selectedMatchIDs: Set<UUID> = []
     @State private var isCreatingNew: Bool = false
     @State private var editorGeneration: Int = 0
-    @State private var showFileTree: Bool = false
     @State private var searchText: String = ""
     @State private var showQuickSwitcher: Bool = false
 
@@ -93,7 +92,6 @@ struct MatchManagerView: View {
                     store: store,
                     selectedMatchIDs: $selectedMatchIDs,
                     isCreatingNew: $isCreatingNew,
-                    showFileTree: $showFileTree,
                     searchText: $searchText
                 )
                 .frame(minWidth: 200, idealWidth: 240, maxWidth: 320)
@@ -204,7 +202,7 @@ private struct BulkActionPanel: View {
             HStack(spacing: 12) {
                 Menu {
                     ForEach(store.writableFiles, id: \.url) { file in
-                        Button(file.displayName) { moveAll(to: file.url) }
+                        Button(store.displayLabel(for: file)) { moveAll(to: file.url) }
                     }
                 } label: {
                     Label("Move to…", systemImage: "folder")

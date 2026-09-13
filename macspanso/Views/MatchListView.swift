@@ -40,13 +40,23 @@ struct MatchListView: View {
     @ObservedObject var store: EspansoConfigStore
     @Binding var selectedMatchIDs: Set<UUID>
     @Binding var isCreatingNew: Bool
-    @Binding var showFileTree: Bool
     @Binding var searchText: String
     @State private var deleteError: String?
     @State private var duplicateError: String?
     @State private var confirmMultiDelete = false
+    // Grouped-by-file is the default; the toolbar folder button flips to the flat list.
+    @AppStorage(Preferences.Key.listGrouped) private var listGrouped: Bool = true
     @AppStorage(Preferences.Key.listSort) private var sortRaw: String = MatchListSort.fileOrder.rawValue
     @State private var filter: MatchListFilter = .all
+
+    /// Single home for the match-list search predicate: the flat list and the
+    /// grouped view must agree on it, or search behaves differently per view mode.
+    static func matchesSearch(_ match: EspansoMatch, _ text: String) -> Bool {
+        guard !text.isEmpty else { return true }
+        return match.primaryTrigger.localizedCaseInsensitiveContains(text) ||
+               match.replacementPreview.localizedCaseInsensitiveContains(text) ||
+               (match.label ?? "").localizedCaseInsensitiveContains(text)
+    }
 
     private var singleSelectedMatchID: UUID? {
         selectedMatchIDs.count == 1 ? selectedMatchIDs.first : nil
@@ -58,13 +68,7 @@ struct MatchListView: View {
 
     private var filteredMatches: [EspansoMatch] {
         var results = store.allMatches.filter(filter.matches)
-        if !searchText.isEmpty {
-            results = results.filter {
-                $0.primaryTrigger.localizedCaseInsensitiveContains(searchText) ||
-                $0.replacementPreview.localizedCaseInsensitiveContains(searchText) ||
-                ($0.label ?? "").localizedCaseInsensitiveContains(searchText)
-            }
-        }
+        results = results.filter { Self.matchesSearch($0, searchText) }
         switch sort {
         case .fileOrder:
             return results
@@ -78,13 +82,19 @@ struct MatchListView: View {
     var body: some View {
         VStack(spacing: 0) {
             searchBar
-            if !showFileTree {
+            // The filter chips only drive the flat list's type filters;
+            // the grouped view narrows by file instead.
+            if !listGrouped {
                 filterBar
             }
             Divider()
 
-            if showFileTree {
-                FileTreeView(store: store, selectedMatchIDs: $selectedMatchIDs)
+            if listGrouped {
+                FileTreeView(
+                    store: store,
+                    selectedMatchIDs: $selectedMatchIDs,
+                    searchText: searchText
+                )
             } else {
                 flatList
             }
@@ -184,25 +194,30 @@ struct MatchListView: View {
                 Text(duplicateError ?? "")
             }
 
-            Menu {
-                ForEach(MatchListSort.allCases) { option in
-                    Button {
-                        sortRaw = option.rawValue
-                    } label: {
-                        if sort == option {
-                            Label(option.label, systemImage: "checkmark")
-                        } else {
-                            Text(option.label)
+            // The sort menu only affects the flat list; in the grouped view,
+            // order is inherent (root files first, folders A → Z), so hide it
+            // rather than show a control that does nothing.
+            if !listGrouped {
+                Menu {
+                    ForEach(MatchListSort.allCases) { option in
+                        Button {
+                            sortRaw = option.rawValue
+                        } label: {
+                            if sort == option {
+                                Label(option.label, systemImage: "checkmark")
+                            } else {
+                                Text(option.label)
+                            }
                         }
                     }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
                 }
-            } label: {
-                Image(systemName: "arrow.up.arrow.down")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Sort matches")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Sort matches")
 
             Spacer()
 
@@ -213,13 +228,13 @@ struct MatchListView: View {
             Spacer()
 
             Button {
-                withAnimation { showFileTree.toggle() }
+                withAnimation { listGrouped.toggle() }
             } label: {
-                Label("Files", systemImage: showFileTree ? "folder.fill" : "folder")
+                Label(listGrouped ? "Grouped View" : "All", systemImage: listGrouped ? "folder" : "list.bullet")
                     .font(.caption)
             }
             .buttonStyle(.plain)
-            .help(showFileTree ? "Show flat list" : "Show file tree")
+            .help(listGrouped ? "Show flat list" : "Show groups")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -290,7 +305,7 @@ struct MatchListView: View {
         if !candidates.isEmpty {
             Menu("Move to") {
                 ForEach(candidates, id: \.url) { file in
-                    Button(file.displayName) {
+                    Button(store.displayLabel(for: file)) {
                         do {
                             try store.move(matchID: matchID, to: file.url)
                         } catch {
@@ -372,7 +387,7 @@ struct MatchRowView: View {
                     Image(systemName: "exclamationmark.2")
                         .imageScale(.small)
                         .foregroundStyle(.orange)
-                        .help("This trigger is also defined in another file — espanso will only use one of them")
+                        .help("This trigger is also defined in another group — espanso will only use one of them")
                 }
                 if match.form != nil {
                     Text("form")

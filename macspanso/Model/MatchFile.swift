@@ -59,7 +59,21 @@ public struct MatchFile: Identifiable, Equatable {
         self.extras = extras
     }
 
+    /// True when matches may be moved into this file — the same rule `move()`
+    /// enforces: not a package, not a file that failed to parse. Drives whether
+    /// a group label acts as a drag-and-drop target.
+    public var isDroppable: Bool {
+        !isPackage && parseError == nil
+    }
+
     public var displayName: String {
         url.lastPathComponent
+    }
+
+    /// File name without its extension — the label shown in the UI. The
+    /// extension is an espanso loading rule, not something the user chose,
+    /// so group labels and pickers show the bare name.
+    public var baseName: String {
+        url.deletingPathExtension().lastPathComponent
     }
 }

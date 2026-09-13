@@ -184,9 +184,20 @@ final class EspansoConfigStore: ObservableObject {
 
     /// Add a new match. Saves to `targetURL` if provided; otherwise to base.yml.
     /// Creates the file if it doesn't exist. Refuses to write into package files
-    /// or files that failed to parse (a write would clobber their unmodeled content).
+    /// or files that failed to parse (a write would clobber their unmodeled content),
+    /// and refuses targets espanso would never load — a file written under any
+    /// other name is invisible in this app and in espanso alike.
     func add(_ match: EspansoMatch, to targetURL: URL? = nil) throws {
         let url = targetURL ?? matchDirectory.appendingPathComponent("base.yml")
+        guard Self.matchExtensions.contains(url.pathExtension) else {
+            throw NSError(
+                domain: "macspanso.add",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "“\(url.lastPathComponent)” is missing the .yml extension — "
+                    + "espanso only loads .yml and .yaml files, so it would never be visible."]
+            )
+        }
         if let existing = matchFiles.first(where: { $0.url == url }),
            existing.isPackage || existing.parseError != nil {
             throw NSError(
@@ -219,6 +230,68 @@ final class EspansoConfigStore: ObservableObject {
     /// Files that the user can write matches into (excludes packages and parse-errored files).
     var writableFiles: [MatchFile] {
         matchFiles.filter { !$0.isPackage && $0.parseError == nil }
+    }
+
+    // MARK: - File grouping
+
+    /// Matches grouped by the file that defines them. The file is espanso's own
+    /// organizational unit — the user can edit the same grouping by hand and
+    /// espanso watches it — so groups map 1:1 to files rather than inventing a
+    /// parallel categorization nothing else knows about. Folders render as one
+    /// flat level: every distinct parent directory (at any depth) becomes a
+    /// group whose header shows its path relative to the match directory root.
+    struct FileGroup: Identifiable {
+        /// Parent directory path relative to the match directory root,
+        /// or nil for files sitting directly in the root.
+        let folderPath: String?
+        let files: [MatchFile]
+        var id: String { folderPath ?? "" }
+    }
+
+    /// Root-level files first, then folders sorted by path. Groups are never empty.
+    var groupedFiles: [FileGroup] {
+        var folders: [String: [MatchFile]] = [:]
+        var root: [MatchFile] = []
+        for file in matchFiles {
+            if let folder = pathRelativeToRoot(for: file.url.deletingLastPathComponent()) {
+                folders[folder, default: []].append(file)
+            } else {
+                root.append(file)
+            }
+        }
+        var groups = root.isEmpty ? [] : [FileGroup(folderPath: nil, files: root)]
+        for folder in folders.keys.sorted() {
+            groups.append(FileGroup(folderPath: folder, files: folders[folder]!))
+        }
+        return groups
+    }
+
+    /// Label used wherever several files are listed together (group headers,
+    /// "Move to" menus, the destination picker). The .yml/.yaml extension is
+    /// espanso's loading rule, not something the user chose, so it is hidden
+    /// and the base name stands alone. When two files share a base name the
+    /// bare name is ambiguous — those fall back to the path relative to the
+    /// match directory root, extension included, since yml-vs-yaml may be the
+    /// only thing distinguishing them.
+    func displayLabel(for file: MatchFile) -> String {
+        let name = file.baseName
+        let isAmbiguous = matchFiles.contains {
+            $0.id != file.id && $0.baseName == name
+        }
+        return isAmbiguous
+            ? pathRelativeToRoot(for: file.url) ?? file.displayName
+            : name
+    }
+
+    /// `url`'s path relative to the match directory root, or nil when `url` is
+    /// the root itself. Both operands are normalized the same way — scanMatchDirectory
+    /// resolves symlinks on every entry and init resolves the root, so the prefix
+    /// comparison is safe (see the URL-identity notes there).
+    private func pathRelativeToRoot(for url: URL) -> String? {
+        let root = matchDirectory.path
+        let path = url.path
+        guard path.hasPrefix(root + "/") else { return nil }
+        return String(path.dropFirst(root.count + 1))
     }
 
     /// One occurrence of a trigger string in a specific match within a specific file.
@@ -321,8 +394,18 @@ final class EspansoConfigStore: ObservableObject {
 
     /// Move a match to a different file. Removes from the source file and appends to
     /// the destination file, writing both. No-op if the match is already in `targetURL`.
-    /// Refuses to move into package files or files with parse errors.
+    /// Refuses to move into package files or files with parse errors, and refuses
+    /// targets espanso would never load (see `add(_:to:)`).
     func move(matchID: UUID, to targetURL: URL) throws {
+        guard Self.matchExtensions.contains(targetURL.pathExtension) else {
+            throw NSError(
+                domain: "macspanso.move",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "“\(targetURL.lastPathComponent)” is missing the .yml extension — "
+                    + "espanso only loads .yml and .yaml files, so it would never be visible."]
+            )
+        }
         // Locate the source file and match
         guard let sourceIndex = matchFiles.firstIndex(where: { f in
                   f.matches.contains(where: { $0.id == matchID })
@@ -404,6 +487,152 @@ final class EspansoConfigStore: ObservableObject {
                 return
             }
         }
+    }
+
+    /// Rename the file backing a group — a group is a file, so renaming a
+    /// group is a file rename. Content is untouched (no YAML rewrite, no
+    /// round-trip surface) and match IDs are stable, so selection and open
+    /// editors survive. The typed name is coerced to the file's current
+    /// extension, so renaming `email.yml` to "Work" yields `Work.yml`; a
+    /// `.yaml` file stays `.yaml`. Refuses package files and targets another
+    /// file already occupies — compared case-insensitively (APFS is
+    /// case-insensitive), except a case-only change of the same file, which
+    /// is a true rename and is allowed.
+    func renameFile(at url: URL, to name: String) throws {
+        guard let index = matchFiles.firstIndex(where: { $0.url == url }) else {
+            throw NSError(domain: "macspanso.rename", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Group not found."])
+        }
+        guard !matchFiles[index].isPackage else {
+            throw NSError(domain: "macspanso.rename", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Cannot rename a package file."])
+        }
+
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != ".", trimmed != "..", !trimmed.contains("/") else {
+            throw NSError(domain: "macspanso.rename", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "“\(name)” is not a valid group name."])
+        }
+
+        let newURL = url.deletingLastPathComponent()
+            .appendingPathComponent(trimmed)
+            // Replace any typed extension rather than appending to it.
+            .deletingPathExtension()
+            .appendingPathExtension(url.pathExtension)
+
+        let targetPath = newURL.path
+        let sourcePath = url.path
+        if sourcePath != targetPath {
+            let isCaseOnlyRename = sourcePath.lowercased() == targetPath.lowercased()
+            if !isCaseOnlyRename {
+                let occupied = matchFiles.contains {
+                    $0.url != url && $0.url.path.lowercased() == targetPath.lowercased()
+                } || FileManager.default.fileExists(atPath: targetPath)
+                if occupied {
+                    throw NSError(domain: "macspanso.rename", code: 4,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                        "A group called “\(newURL.lastPathComponent)” already exists."])
+                }
+            }
+
+            // A rename looks like a create+delete to the watcher; suppress both
+            // spellings (parent and root are suppressed inside) so the app's
+            // own rename isn't read as an external edit.
+            try suppressingWatcherEvents(for: url) {
+                try suppressingWatcherEvents(for: newURL) {
+                    try FileManager.default.moveItem(atPath: sourcePath, toPath: targetPath)
+                }
+            }
+            // Disk succeeded — now re-point memory and the watch.
+            matchFiles[index].url = newURL
+            matchFiles.sort { $0.url.path < $1.url.path }
+            watcher.stopWatching(url: url)
+            watcher.watch(url: newURL)
+        }
+    }
+
+    /// Delete a group's file outright, or — when `movingMatchesTo` is set —
+    /// append all its matches to that file in one composed write first, so
+    /// matches are never lost. If the source can't be removed after the
+    /// destination write succeeded, the destination is rewritten without them
+    /// (same compensation as `move`) and the error surfaces. Refuses package
+    /// files; a file that failed to parse may only be deleted outright — its
+    /// contents are unreadable, so they cannot be moved anywhere.
+    func deleteFile(at url: URL, movingMatchesTo targetURL: URL? = nil) throws {
+        guard Self.matchExtensions.contains(url.pathExtension) else {
+            throw NSError(domain: "macspanso.deleteGroup", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey:
+                        "“\(url.lastPathComponent)” is not a match file."])
+        }
+        guard let index = matchFiles.firstIndex(where: { $0.url == url }) else {
+            throw NSError(domain: "macspanso.deleteGroup", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Group not found."])
+        }
+        guard !matchFiles[index].isPackage else {
+            throw NSError(domain: "macspanso.deleteGroup", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Cannot delete a package file."])
+        }
+
+        let source = matchFiles[index]
+        // Moving to itself, or from a file with no matches in memory, is an
+        // outright delete.
+        let target: URL? = (targetURL == url || source.matches.isEmpty) ? nil : targetURL
+        if let target {
+            if !Self.matchExtensions.contains(target.pathExtension) {
+                throw NSError(domain: "macspanso.deleteGroup", code: 4,
+                              userInfo: [NSLocalizedDescriptionKey:
+                            "“\(target.lastPathComponent)” is not a match file."])
+            }
+            if let dest = matchFiles.first(where: { $0.url == target }),
+               dest.isPackage || dest.parseError != nil {
+                throw NSError(domain: "macspanso.deleteGroup", code: 5,
+                              userInfo: [NSLocalizedDescriptionKey:
+                            "Cannot move matches into a package or unreadable file."])
+            }
+        }
+
+        // With a destination: write it first (source still on disk), remove the
+        // source second, and compensate the destination write if the removal
+        // fails — the same two-file dance as move(). Either both sides agree on
+        // disk, or the source is untouched.
+        if let target {
+            let destIndex = matchFiles.firstIndex { $0.url == target }
+            let destMatches = (destIndex.map { matchFiles[$0].matches } ?? []) + source.matches
+            do {
+                try suppressingWatcherEvents(for: target) {
+                    try YAMLSerializer.write(fileContent(destMatches, for: target), to: target)
+                }
+                try suppressingWatcherEvents(for: url) {
+                    try FileManager.default.removeItem(atPath: url.path)
+                }
+            } catch {
+                // Removal failed after the destination write: strip the appended
+                // matches back out so they exist in one file, not two.
+                try? suppressingWatcherEvents(for: target) {
+                    try YAMLSerializer.write(
+                        fileContent(destIndex.map { matchFiles[$0].matches } ?? [], for: target),
+                        to: target)
+                }
+                throw error
+            }
+
+            // Both disk writes succeeded — now update memory.
+            if let destIndex {
+                matchFiles[destIndex].matches = destMatches
+            } else {
+                matchFiles.append(MatchFile(url: target, matches: destMatches, isPackage: false))
+                matchFiles.sort { $0.url.path < $1.url.path }
+                watcher.watch(url: target)
+            }
+        } else {
+            try suppressingWatcherEvents(for: url) {
+                try FileManager.default.removeItem(atPath: url.path)
+            }
+        }
+
+        // Commit: drop the source from memory and stop watching it.
+        matchFiles.remove(at: index)
+        watcher.stopWatching(url: url)
     }
 
     /// Returns the MatchFile that owns a given match ID.

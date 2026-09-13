@@ -46,7 +46,7 @@ struct MatchEditorForm: View {
 
     private var isNew: Bool { sourceFile == nil }
     private var isDirty: Bool { draft != initialMatch }
-    private var canSave: Bool { validationErrors.isEmpty && isDirty }
+    private var canSave: Bool { validationErrors.isEmpty && (isDirty || groupChanged) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,8 +55,8 @@ struct MatchEditorForm: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(isNew ? "New Match" : "Edit Match")
                         .font(.headline)
-                    if let file = sourceFile {
-                        Text(file.displayName)
+                    if let file = store.file(containing: draft.id) {
+                        Text(store.displayLabel(for: file))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -71,7 +71,7 @@ struct MatchEditorForm: View {
             // Form body
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if isNew { destinationSection }
+                    destinationSection
                     triggerSection
                     replacementSection
                     if !isFormMatch {
@@ -128,13 +128,21 @@ struct MatchEditorForm: View {
 
     private var destinationSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Save to", systemImage: "folder")
+            Label(isNew ? "Save to" : "Group", systemImage: "folder")
                 .sectionHeader()
 
             HStack(spacing: 8) {
                 Picker("", selection: destinationBinding) {
                     ForEach(store.writableFiles, id: \.url) { file in
-                        Text(file.displayName).tag(Optional(file.url))
+                        Text(store.displayLabel(for: file)).tag(Optional(file.url))
+                    }
+                    // A destination chosen via New File… isn't in writableFiles
+                    // until it exists — without this item the picker renders
+                    // blank and the choice the user just made looks lost.
+                    if let dest = destinationURL,
+                       !store.writableFiles.contains(where: { $0.url == dest }) {
+                        Text(store.displayLabel(for: MatchFile(url: dest, matches: [], isPackage: false))
+                                + " (new group)").tag(Optional(dest))
                     }
                     if store.writableFiles.isEmpty {
                         Text("base.yml").tag(Optional(defaultDestination))
@@ -145,23 +153,48 @@ struct MatchEditorForm: View {
                 Button {
                     promptForNewFile()
                 } label: {
-                    Label("New File…", systemImage: "doc.badge.plus")
+                    Label("New Group…", systemImage: "folder.badge.plus")
                         .labelStyle(.titleAndIcon)
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
             }
         }
-        .onAppear { hydrateDestination() }
+        // Only new matches hydrate a destination: for an existing match the
+        // picker already defaults to the file holding it, and pulling
+        // lastDestinationFilePath here would silently arm a move.
+        .onAppear { if isNew { hydrateDestination() } }
     }
 
     private var defaultDestination: URL {
         store.matchDirectory.appendingPathComponent("base.yml")
     }
 
+    /// The file that currently holds this match — looked up live rather than
+    /// from the captured `sourceFile`, so a group renamed or deleted while the
+    /// form is open can't leave a stale URL here (a stale URL would make the
+    /// next Save move the match back to the old path).
+    private var currentFileURL: URL? {
+        isNew ? nil : store.file(containing: draft.id)?.url
+    }
+
+    /// The group the match will live in after save. For a new match that's the
+    /// picked destination (or base.yml); for an existing match it defaults to
+    /// the file that already holds it.
+    private var effectiveDestination: URL {
+        if isNew { return destinationURL ?? defaultDestination }
+        return destinationURL ?? currentFileURL ?? defaultDestination
+    }
+
+    /// True when an existing match's group was changed in the picker — the
+    /// move is applied on Save, so it alone must enable the Save button.
+    private var groupChanged: Bool {
+        !isNew && effectiveDestination != currentFileURL
+    }
+
     private var destinationBinding: Binding<URL?> {
         Binding(
-            get: { destinationURL ?? defaultDestination },
+            get: { effectiveDestination },
             set: { destinationURL = $0 }
         )
     }
@@ -185,14 +218,25 @@ struct MatchEditorForm: View {
     private func promptForNewFile() {
         let panel = NSSavePanel()
         panel.directoryURL = store.matchDirectory
-        panel.allowedContentTypes = [.yaml]
+        // A dynamic type whose preferred extension is "yml" — the panel then
+        // appends .yml to a bare typed name, so what the panel shows is what
+        // gets created. (.yaml would also load in espanso, but the displayed
+        // name must not differ from the created one.)
+        panel.allowedContentTypes = [UTType(filenameExtension: "yml") ?? .yaml]
         panel.nameFieldStringValue = "untitled.yml"
-        panel.message = "Create a new espanso match file"
+        panel.message = "Create a new match group"
         if panel.runModal() == .OK, let url = panel.url {
-            // Coerce the extension; espanso requires .yml.
-            let coerced = url.pathExtension == "yml" ? url : url.deletingPathExtension().appendingPathExtension("yml")
-            destinationURL = coerced
+            // Coerce regardless — belt and braces against the panel returning
+            // anything espanso wouldn't load.
+            destinationURL = Self.withYMLExtension(url)
         }
+    }
+
+    /// The URL re-pointed at .yml: strips whatever extension it has (including
+    /// none) and appends yml. Typing `email` in the save panel must yield
+    /// `email.yml`, never a bare `email` espanso would ignore.
+    private static func withYMLExtension(_ url: URL) -> URL {
+        url.deletingPathExtension().appendingPathExtension("yml")
     }
 
     private var triggerSection: some View {
@@ -669,7 +713,16 @@ struct MatchEditorForm: View {
                 try store.add(matchToSave, to: target)
                 Preferences.shared.lastDestinationFilePath = target.path
             } else {
-                try store.update(matchToSave)
+                // Move first, then update: update() locates the match by id, so
+                // after the move it writes the draft into the destination file.
+                if groupChanged {
+                    try store.move(matchID: matchToSave.id, to: effectiveDestination)
+                }
+                // A group-only change needs no rewrite — move() already
+                // persisted the stored content to the destination.
+                if isDirty {
+                    try store.update(matchToSave)
+                }
             }
             saveError = nil
             onSave(matchToSave)
