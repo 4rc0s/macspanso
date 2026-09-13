@@ -34,7 +34,9 @@ public enum MatchExpander {
         case .echo:
             return stringParam(v, "echo") ?? ""
         case .random:
-            if case let .array(choices)? = v.params?["choices"], let first = choices.first {
+            // `choices` is now [YAMLAny]; take the first entry that is a string.
+            if case let .array(choices)? = v.params?["choices"],
+               let first = choices.compactMap(\.stringValue).first {
                 return first
             }
             return "[random]"
@@ -46,12 +48,21 @@ public enum MatchExpander {
             return "[form]"
         case .match:
             return "[match]"
+        case .choice:
+            // The first offered label, mirroring how `.random` previews a choice.
+            if case let .array(values)? = v.params?["values"],
+               case let .dictionary(first)? = values.first,
+               case let .string(label)? = first["label"] {
+                return label
+            }
+            return "[choice]"
+        case .unknown(let raw):
+            return "[\(raw)]"
         }
     }
 
     private static func stringParam(_ v: EspansoVar, _ key: String) -> String? {
-        if case let .string(s)? = v.params?[key] { return s }
-        return nil
+        v.params?[key]?.stringValue
     }
 
     private static let strftimeToICU: [Character: String] = [

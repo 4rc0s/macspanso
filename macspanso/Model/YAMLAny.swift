@@ -81,3 +81,12 @@ public struct AnyCodingKey: CodingKey {
     public init(stringValue: String) { self.stringValue = stringValue }
     public init?(intValue: Int) { nil }
 }
+
+public extension YAMLAny {
+    /// The value as a String when it is one — the common shape for var params
+    /// (`cmd`, `format`, `echo`) and for the entries of a `random` choices list.
+    var stringValue: String? {
+        if case let .string(s) = self { return s }
+        return nil
+    }
+}

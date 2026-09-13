@@ -405,3 +405,170 @@ extension RoundTripPreservationTests {
         XCTAssertEqual(back[7].vars?.first?.params?["cmd"], .string("echo one\necho two\n"))
     }
 }
+
+// MARK: - Variable-level preservation (the third tier)
+//
+// `MatchFileContent.extras` and `EspansoMatch.extras` preserved unmodelled keys at
+// the file and match tiers; the var tier had neither extras nor a value type wide
+// enough for espanso's own shapes. Three distinct failures lived here, and the
+// write-time round-trip check is structurally blind to all of them, because both
+// sides of that comparison run through this same decoder.
+
+extension RoundTripPreservationTests {
+
+    /// `inject_vars` and `depends_on` are documented on every variable type in
+    /// espanso's schema. They used to be read, ignored, and dropped on save.
+    func testVarLevelUnknownKeysSurviveRoundTrip() throws {
+        let yaml = """
+        matches:
+          - trigger: "::s"
+            replace: "{{out}}"
+            vars:
+              - name: out
+                type: shell
+                inject_vars: false
+                depends_on:
+                  - other
+                params:
+                  cmd: echo hi
+        """
+        let match = try XCTUnwrap(try YAMLSerializer.decode(yaml: yaml).first)
+        let v = try XCTUnwrap(match.vars?.first)
+        XCTAssertEqual(v.extras["inject_vars"], .bool(false))
+        XCTAssertEqual(v.extras["depends_on"], .array([.string("other")]))
+
+        let out = try YAMLSerializer.encode([match])
+        XCTAssertTrue(out.contains("inject_vars"), "inject_vars must survive a save: \(out)")
+        XCTAssertTrue(out.contains("depends_on"), "depends_on must survive a save: \(out)")
+
+        var again = try XCTUnwrap(try YAMLSerializer.decode(yaml: out).first)
+        again.id = match.id
+        XCTAssertEqual(again, match)
+    }
+
+    func testVarModelledKeysDoNotLeakIntoExtras() throws {
+        let yaml = """
+        matches:
+          - trigger: "::s"
+            replace: "{{out}}"
+            vars:
+              - name: out
+                type: shell
+                params:
+                  cmd: echo hi
+        """
+        let v = try XCTUnwrap(try YAMLSerializer.decode(yaml: yaml).first?.vars?.first)
+        XCTAssertTrue(v.extras.isEmpty,
+            "name/type/params must not be duplicated into extras: \(v.extras)")
+    }
+
+    /// A `choice` var used to fail twice over: `choice` wasn't in `VarType`, and
+    /// its `values:` list of label/id mappings had no representation in the param
+    /// value type. Either one took the whole file down as a parse error.
+    func testChoiceVarDecodesAndRoundTrips() throws {
+        let yaml = """
+        matches:
+          - trigger: "::pick"
+            replace: "{{c}}"
+            vars:
+              - name: c
+                type: choice
+                params:
+                  values:
+                    - label: First
+                      id: one
+                    - label: Second
+                      id: two
+        """
+        let match = try XCTUnwrap(try YAMLSerializer.decode(yaml: yaml).first)
+        let v = try XCTUnwrap(match.vars?.first)
+        XCTAssertEqual(v.type, .choice)
+        XCTAssertEqual(v.params?["values"], .array([
+            .dictionary(["label": .string("First"),  "id": .string("one")]),
+            .dictionary(["label": .string("Second"), "id": .string("two")]),
+        ]))
+
+        var again = try XCTUnwrap(try YAMLSerializer.decode(
+            yaml: try YAMLSerializer.encode([match])).first)
+        again.id = match.id
+        XCTAssertEqual(again, match)
+    }
+
+    /// A `form` var's `fields:` is a mapping. `form` was already a known type, so
+    /// this one bricked files purely on the param value type.
+    func testFormVarWithFieldsDecodesAndRoundTrips() throws {
+        let yaml = """
+        matches:
+          - trigger: "::f"
+            replace: "{{f}}"
+            vars:
+              - name: f
+                type: form
+                params:
+                  layout: "Hi [[name]]"
+                  fields:
+                    name:
+                      multiline: false
+        """
+        let match = try XCTUnwrap(try YAMLSerializer.decode(yaml: yaml).first)
+        let v = try XCTUnwrap(match.vars?.first)
+        XCTAssertEqual(v.type, .form)
+        XCTAssertEqual(v.params?["fields"],
+                       .dictionary(["name": .dictionary(["multiline": .bool(false)])]))
+
+        var again = try XCTUnwrap(try YAMLSerializer.decode(
+            yaml: try YAMLSerializer.encode([match])).first)
+        again.id = match.id
+        XCTAssertEqual(again, match)
+    }
+
+    /// The class fix: a type espanso adds after this build must round-trip rather
+    /// than quarantine the file, exactly as an unrecognised `uppercase_style` does.
+    func testUnknownVarTypeRoundTripsInsteadOfBrickingTheFile() throws {
+        let yaml = """
+        matches:
+          - trigger: "::x"
+            replace: "{{v}}"
+            vars:
+              - name: v
+                type: some_future_type
+                params:
+                  whatever: 1.5
+        """
+        let match = try XCTUnwrap(try YAMLSerializer.decode(yaml: yaml).first)
+        let v = try XCTUnwrap(match.vars?.first)
+        XCTAssertEqual(v.type, .unknown("some_future_type"))
+        XCTAssertFalse(v.type.isEditable)
+        XCTAssertEqual(v.params?["whatever"], .double(1.5),
+            "a float param used to have no representation either")
+
+        let out = try YAMLSerializer.encode([match])
+        XCTAssertTrue(out.contains("some_future_type"), "the type must survive: \(out)")
+    }
+
+    /// The whole tier, through the real write path so verification runs on it.
+    func testVarTierSurvivesAnActualWrite() throws {
+        let yaml = """
+        matches:
+          - trigger: "::all"
+            replace: "{{c}}"
+            vars:
+              - name: c
+                type: choice
+                inject_vars: true
+                depends_on: [a, b]
+                params:
+                  values:
+                    - label: One
+                      id: "1"
+        """
+        let content = try YAMLSerializer.decodeContent(yaml: yaml)
+        let url = try tempDir("var-tier").appendingPathComponent("base.yml")
+        try YAMLSerializer.write(content, to: url)
+
+        let text = try String(contentsOf: url, encoding: .utf8)
+        for needle in ["type: choice", "inject_vars", "depends_on", "label: One"] {
+            XCTAssertTrue(text.contains(needle), "`\(needle)` must be on disk: \(text)")
+        }
+    }
+}
