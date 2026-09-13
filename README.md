@@ -64,6 +64,27 @@ Build and run the `macspanso` scheme. The app reads your espanso match directory
 xcodebuild test -scheme macspanso -destination 'platform=macOS'
 ```
 
+### CI builds (this fork)
+
+GitHub Actions builds and tests the app on every push to `main`. Each run uploads the built app as an artifact:
+
+- **Download:** [Actions tab](../../actions) → pick a run → **Artifacts** → `macspanso-app`, or via CLI:
+
+  ```bash
+  gh run download <run-id> --repo 4rc0s/macspanso --name macspanso-app
+  ```
+
+  The run ID is the number in the run's URL. The artifact extracts to `macspanso.app`.
+
+- **Unsigned build:** CI builds are ad-hoc signed only (no Developer ID signature or notarization). If Gatekeeper blocks a downloaded copy, clear the quarantine flag:
+
+  ```bash
+  xattr -dr com.apple.quarantine macspanso.app
+  ```
+
+- **Fresh forks:** Actions must be enabled once in the web UI (Actions tab → *I understand my workflows, go ahead and enable them*). Pushes made before enabling don't trigger runs — push again afterwards.
+- **Releases:** signed & notarized DMGs are only produced by `v*` tags and require signing secrets this fork doesn't have. For installers, use the [upstream Releases](https://github.com/jeffcaldwellca/macspanso/releases) page.
+
 ---
 
 ## Usage
