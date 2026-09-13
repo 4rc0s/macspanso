@@ -414,7 +414,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func checkForUpdates() {
         updateChecker.checkNow { [weak self] outcome in
-            guard let self else { return }
+            // Nothing below needs the instance — `Self.releasesURL` is a static.
+            // The check is only here so a torn-down controller can't put up a
+            // modal alert.
+            guard self != nil else { return }
             let alert = NSAlert()
             switch outcome {
             case .updateAvailable(let version):
