@@ -71,7 +71,7 @@ final class YAMLParsingTests: XCTestCase {
         """
         let matches = try YAMLSerializer.decode(yaml: yaml)
         let v = try XCTUnwrap(matches[0].vars?.first)
-        XCTAssertEqual(v.params?["choices"], .array(["Option A", "Option B"]))
+        XCTAssertEqual(v.params?["choices"], .array([.string("Option A"), .string("Option B")]))
     }
 
     func testFormMatch() throws {

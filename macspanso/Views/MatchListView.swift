@@ -360,6 +360,14 @@ struct MatchRowView: View {
                 Text(match.primaryTrigger)
                     .font(.system(.body, design: .monospaced))
                     .lineLimit(1)
+                // The search field above matches on `label`, so it has to be visible
+                // here too — rendered the same way QuickSwitcherRow already does it.
+                if let label = match.label, !label.isEmpty {
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 if isConflicted {
                     Image(systemName: "exclamationmark.2")
                         .imageScale(.small)

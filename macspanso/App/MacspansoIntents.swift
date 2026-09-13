@@ -22,7 +22,7 @@ struct ToggleEspansoIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         await MainActor.run {
-            MacspansoIntents.appDelegate()?.processManager?.toggleEnabled()
+            MacspansoIntents.appDelegate()?.processManager?.toggleExpansions()
         }
         return .result()
     }

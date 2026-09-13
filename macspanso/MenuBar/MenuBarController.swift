@@ -112,8 +112,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             headerTitle = "💤 Snoozed until \(formatSnoozeEnd(until))"
         } else {
             switch processManager.state {
-            case .running:      headerTitle = "● Espanso enabled"
-            case .disabled:     headerTitle = "○ Espanso disabled"
+            case .running:      headerTitle = "● Espanso running"
             case .stopped:      headerTitle = "✕ Espanso stopped"
             case .notInstalled: headerTitle = "⚠ Espanso not installed"
             case .unknown:      headerTitle = "Espanso"
@@ -160,12 +159,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
             menu.addItem(.separator())
 
-            let enableItem = NSMenuItem(title: "Espanso Enabled",
-                                        action: #selector(toggleEnabled), keyEquivalent: "")
+            // Two verbs rather than one checkmark: espanso never reports whether
+            // expansion is enabled, so a checkmark would have to guess, and it
+            // guessed "on" even while expansion was off.
+            let enableItem = NSMenuItem(title: "Enable Expansions",
+                                        action: #selector(enableExpansions), keyEquivalent: "")
             enableItem.target = self
-            enableItem.state = (processManager.state == .running) ? .on : .off
-            enableItem.isEnabled = (processManager.state == .running || processManager.state == .disabled)
+            enableItem.isEnabled = (processManager.state == .running)
             menu.addItem(enableItem)
+
+            let disableItem = NSMenuItem(title: "Disable Expansions",
+                                         action: #selector(disableExpansions), keyEquivalent: "")
+            disableItem.target = self
+            disableItem.isEnabled = (processManager.state == .running)
+            menu.addItem(disableItem)
 
             let restartItem = NSMenuItem(title: "Restart Espanso",
                                          action: #selector(restartEspanso), keyEquivalent: "")
@@ -370,8 +377,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func snoozeUntilTomorrow() { processManager.snooze(for: .untilTomorrow) }
     @objc private func cancelSnooze() { processManager.cancelSnooze() }
 
-    @objc private func toggleEnabled() {
-        processManager.toggleEnabled()
+    @objc private func enableExpansions() {
+        processManager.setExpansions(enabled: true)
+    }
+
+    @objc private func disableExpansions() {
+        processManager.setExpansions(enabled: false)
     }
 
     @objc private func restartEspanso() {

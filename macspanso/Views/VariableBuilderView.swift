@@ -124,7 +124,20 @@ struct VarCardView: View {
             paramTextField(key: "echo", placeholder: "static value", label: "Value")
         case .clipboard, .form, .match:
             EmptyView()
+        case .choice, .unknown:
+            readOnlyParamsNote
         }
+    }
+
+    /// espanso shapes macspanso has no editor for — a `choice` var's list of
+    /// label/id mappings, or a type espanso added after this build. Saying so is
+    /// better than an empty pane that implies there is nothing to keep: the params
+    /// round-trip untouched either way.
+    private var readOnlyParamsNote: some View {
+        Label("Settings for this variable are kept as they are in the file.",
+              systemImage: "lock")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     private func paramTextField(key: String, placeholder: String, label: String) -> some View {
@@ -135,8 +148,7 @@ struct VarCardView: View {
                 .frame(width: 80, alignment: .trailing)
             TextField(placeholder, text: Binding(
                 get: {
-                    guard case .string(let v) = variable.params?[key] else { return "" }
-                    return v
+                    variable.params?[key]?.stringValue ?? ""
                 },
                 set: { v in
                     if variable.params == nil { variable.params = [:] }
@@ -156,10 +168,12 @@ struct VarCardView: View {
             TextEditor(text: Binding(
                 get: {
                     guard case .array(let arr) = variable.params?["choices"] else { return "" }
-                    return arr.joined(separator: "\n")
+                    // Non-string entries can't be shown as lines; skip them rather
+                    // than render them wrong. Editing here rewrites the whole list.
+                    return arr.compactMap(\.stringValue).joined(separator: "\n")
                 },
                 set: { text in
-                    let choices = text.components(separatedBy: "\n")
+                    let choices = text.components(separatedBy: "\n").map(YAMLAny.string)
                     if variable.params == nil { variable.params = [:] }
                     variable.params?["choices"] = .array(choices)
                 }
@@ -184,6 +198,7 @@ struct VarTypePickerSheet: View {
         .form:      "Form field (for use inside a form match)",
         .echo:      "A static string value",
         .match:     "Re-uses the output of another match",
+        .choice:    "Pick from a list of labelled options",
     ]
 
     var body: some View {
@@ -194,7 +209,7 @@ struct VarTypePickerSheet: View {
 
             Divider()
 
-            ForEach(VarType.allCases, id: \.self) { type in
+            ForEach(VarType.known, id: \.self) { type in
                 Button {
                     onSelect(type)
                 } label: {

@@ -44,7 +44,7 @@ final class MatchExpanderTests: XCTestCase {
         let m = EspansoMatch(
             trigger: "::r",
             replace: "{{r}}",
-            vars: [EspansoVar(name: "r", type: .random, params: ["choices": .array(["a", "b", "c"])])]
+            vars: [EspansoVar(name: "r", type: .random, params: ["choices": .array([.string("a"), .string("b"), .string("c")])])]
         )
         XCTAssertEqual(MatchExpander.preview(of: m), "a")
     }

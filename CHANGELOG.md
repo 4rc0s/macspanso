@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.0] - 2026-09-13
+
+### Added
+- **Match labels** — a match can now be given a name, shown beside its trigger in the list. The match list and the Quick Switcher have always searched labels, but there was no way to set one short of editing YAML by hand; espanso shows the label in its own search bar too.
+- **Variable settings are no longer lost, and two kinds of file can be opened again** — `inject_vars` and `depends_on` on a variable were read and then quietly dropped every time the file was saved. Separately, a file containing a **choice** variable, or a **form** variable with fields, couldn't be read at all: it showed as unparseable and couldn't be edited in macspanso. Both are fixed, and a variable type espanso adds in future will now be preserved rather than making the file unreadable.
+- **Saves are checked before they touch disk** — when macspanso rewrites a match file it now reads its own output back and compares it against what it meant to write. If anything fails to survive the trip the save is refused with an explanation and the file keeps its previous contents, rather than the rewrite landing and the loss being noticed later.
+- **Advanced match options** — a collapsed **Advanced** section in the match editor exposes five more espanso options: matching only at the start or end of a word, the capitalisation style used alongside **Propagate case**, whether the replacement is pasted from the clipboard or typed as keystrokes (the fix for long or multi-line text in apps that drop characters), extra search terms that find the match in espanso's own search bar, and a free-text comment. Options you don't touch are left out of the file entirely rather than written as defaults.
+
+### Fixed
+- **Expansions could be switched off but not back on** — the menu's **Espanso Enabled** item decided which way to flip by reading `espanso status`, but that command only reports whether the espanso daemon is running, never whether expansion is enabled. It therefore always took the "disable" branch: a second click disabled again, and there was no way back from the menu or from the Shortcuts action. The menu now offers explicit **Enable Expansions** and **Disable Expansions** commands, and the Shortcuts **Toggle Espanso** action asks espanso itself to flip the state.
+- **Snooze never ended** — when a snooze ran out, expansion was only switched back on if macspanso believed it was currently disabled, which it had no way to know. Espanso stayed disabled indefinitely while the menu showed it as enabled, and starting a snooze before the first status check silently didn't disable anything at all. Both ends of a snooze now act unconditionally.
+- **The menu said expansion was on when it was off** — the **Espanso Enabled** checkmark was driven by whether the daemon was alive, so it stayed ticked after expansion was turned off. The status line now reads **Espanso running**, which is what can actually be determined.
+
 ## [1.6.0] - 2026-09-13
 
 ### Added
@@ -30,7 +43,7 @@
 ## [1.4.0] - 2026-06-10
 
 ### Fixed
-- **Settings beyond matches no longer deleted on save** — editing a match in a file containing `global_vars:`, `imports:`, or any other top-level key used to silently erase those keys when the file was rewritten. Unmodelled per-match options (`markdown:`, `priority:`, `paste_shortcut:`, app filters, …) were dropped the same way. All YAML the editor doesn't model now survives every save.
+- **Settings beyond matches no longer deleted on save** — editing a match in a file containing `global_vars:`, `imports:`, or any other top-level key used to silently erase those keys when the file was rewritten. Unmodelled per-match options (`markdown:`, `html:`, `image_path:`, `paragraph:`, …) were dropped the same way. All YAML the editor doesn't model now survives every save.
 - **espanso commands could hang the app** — command output larger than 64 KB (e.g. `espanso log`) deadlocked the process runner, and a missing espanso binary left it blocked forever. Match-directory detection now also times out after 3 seconds and falls back to the default location instead of waiting on a stuck binary.
 - **References to global variables blocked saving** — a `{{name}}` referencing a `global_vars:` declaration in another file was flagged as unresolved and disabled the Save button.
 - **Regex toggle could write invalid YAML** — switching a multi-trigger match to Regex and back produced both `trigger:` and `triggers:` keys on the same match.

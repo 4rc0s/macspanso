@@ -114,3 +114,103 @@ extension EspansoProcessManagerTests {
             "timeout must fall back to the default directory, got \(dir.path)")
     }
 }
+
+// MARK: - Expansion enable/disable
+//
+// espanso reports daemon liveness only: `espanso status` prints "espanso is running"
+// whether or not expansion is enabled, and no `espanso cmd` subcommand queries it.
+// Code that branched on a `.disabled` state therefore never took that branch, which
+// made the menu toggle one-way and left an expiring snooze disabled forever.
+
+extension EspansoProcessManagerTests {
+
+    /// A fake espanso that appends each invocation's arguments to `log`.
+    private func makeRecordingEspanso(
+        log: URL, statusOutput: String = "espanso is running"
+    ) throws -> String {
+        addTeardownBlock { try? FileManager.default.removeItem(at: log) }
+        return try makeFakeEspanso(script: """
+        echo "$@" >> \(log.path)
+        echo '\(statusOutput)'
+        """)
+    }
+
+    private func makeLogURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("espanso-calls-\(UUID().uuidString).log")
+    }
+
+    /// These commands run in detached Tasks, so poll rather than assuming ordering.
+    private func waitForCall(_ needle: String, in log: URL, seconds: Double = 5) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if let text = try? String(contentsOf: log, encoding: .utf8),
+               text.contains(needle) { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return false
+    }
+
+    func testCancelSnoozeReenablesExpansion() async throws {
+        let log = makeLogURL()
+        let manager = EspansoProcessManager(espansoPath: try makeRecordingEspanso(log: log),
+                                            preferences: makeIsolatedPreferences())
+        defer { manager.cancelSnooze(reenable: false) }
+
+        manager.snooze(until: Date(timeIntervalSinceNow: 3600))
+        let disabled = await waitForCall("cmd disable", in: log)
+        XCTAssertTrue(disabled, "snoozing must disable expansion")
+
+        manager.cancelSnooze(reenable: true)
+        let reenabled = await waitForCall("cmd enable", in: log)
+        XCTAssertTrue(reenabled,
+            "an ending snooze must re-enable expansion; this cannot be guarded on a "
+            + "disabled state, because espanso never reports one")
+    }
+
+    func testSetExpansionsSendsCommandRegardlessOfKnownState() async throws {
+        let log = makeLogURL()
+        let manager = EspansoProcessManager(espansoPath: try makeRecordingEspanso(log: log),
+                                            preferences: makeIsolatedPreferences())
+        // No refresh() yet, so state is .unknown — the old state-driven toggle sent
+        // nothing at all here.
+        XCTAssertEqual(manager.state, .unknown)
+
+        manager.setExpansions(enabled: false)
+        let disabled = await waitForCall("cmd disable", in: log)
+        XCTAssertTrue(disabled)
+
+        manager.setExpansions(enabled: true)
+        let enabled = await waitForCall("cmd enable", in: log)
+        XCTAssertTrue(enabled,
+            "expansion must be re-enableable; the old toggle could only ever disable")
+    }
+
+    func testToggleExpansionsDelegatesToEspanso() async throws {
+        let log = makeLogURL()
+        let manager = EspansoProcessManager(espansoPath: try makeRecordingEspanso(log: log),
+                                            preferences: makeIsolatedPreferences())
+        manager.toggleExpansions()
+        let toggled = await waitForCall("cmd toggle", in: log)
+        XCTAssertTrue(toggled,
+            "toggling without a readable state must let espanso do the flipping")
+    }
+
+    func testRunningDaemonWithExpansionDisabledStillReadsAsRunning() async throws {
+        // Exactly what espanso 2.4.1 prints after `espanso cmd disable`.
+        let path = try makeFakeEspanso(script: "echo 'espanso is running'")
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences())
+        await manager.refresh()
+        XCTAssertEqual(manager.state, .running,
+            "status reports liveness only — there is no disabled state to detect")
+    }
+
+    func testStoppedDaemonIsParsed() async throws {
+        let path = try makeFakeEspanso(script: "echo 'espanso is not running'")
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences())
+        await manager.refresh()
+        XCTAssertEqual(manager.state, .stopped)
+    }
+}
