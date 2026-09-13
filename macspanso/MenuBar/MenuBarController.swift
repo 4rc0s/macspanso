@@ -470,7 +470,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// title and renamed it from "Preferences…" to "Settings…" in macOS 13.
     /// A separator or a disabled placeholder carries no target, so the target
     /// check keeps this from finding one.
-    static func settingsItemIndex(in menu: NSMenu) -> Int? {
+    nonisolated static func settingsItemIndex(in menu: NSMenu) -> Int? {
         menu.items.firstIndex {
             $0.keyEquivalent == ","
                 && $0.keyEquivalentModifierMask == .command

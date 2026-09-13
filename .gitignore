@@ -39,4 +39,5 @@ certificate.p12
 
 # Other
 docs/*.md
-*.zipdefault.profraw
+*.zip
+default.profraw
