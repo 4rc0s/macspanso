@@ -32,11 +32,16 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO
 
+      - name: Zip app bundle
+        run: |
+          cd build/DerivedData/Build/Products/Debug
+          zip -ry macspanso-app.zip macspanso.app
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: macspanso-app
-          path: build/DerivedData/Build/Products/Debug/macspanso.app
+          path: build/DerivedData/Build/Products/Debug/macspanso-app.zip
 
       - name: Test
         run: |
