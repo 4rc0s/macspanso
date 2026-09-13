@@ -198,6 +198,7 @@ struct VarTypePickerSheet: View {
         .form:      "Form field (for use inside a form match)",
         .echo:      "A static string value",
         .match:     "Re-uses the output of another match",
+        .choice:    "Pick from a list of labelled options",
     ]
 
     var body: some View {
