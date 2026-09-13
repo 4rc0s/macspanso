@@ -224,6 +224,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             )
             windowController = wc
         }
+        // Accessory apps are invisible to the Cmd-Tab switcher. While a window
+        // is open, behave as a regular app so Match Manager shows up there
+        // (and in the Dock) — reverted when the window closes. The two forms
+        // of presence can't be separated: the switcher lists apps, not windows.
+        NSApp.setActivationPolicy(.regular)
         // Deliberately the deprecated explicit form, not the no-argument
         // NSApp.activate() added in macOS 14: for an accessory (LSUIElement) app
         // the cooperative no-arg variant can silently no-op when another app
@@ -252,6 +257,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func windowDidClose(_ note: Notification) {
         windowController = nil
+        // Last window closed — drop out of the Cmd-Tab switcher and Dock again.
+        NSApp.setActivationPolicy(.accessory)
     }
 
     private func buildSnapshotsMenuItem() -> NSMenuItem {
