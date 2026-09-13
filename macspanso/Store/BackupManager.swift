@@ -61,6 +61,9 @@ final class BackupManager {
             try await Self.unzipBackup(source, to: matchDirectory)
             store?.load()
         } catch {
+            // The directory may now be in a half-deleted state; resync the
+            // store with disk so the UI doesn't show matches that are gone.
+            store?.load()
             showAlert(title: "Import Failed", message: error.localizedDescription)
         }
     }
@@ -132,6 +135,9 @@ final class BackupManager {
             try await Self.unzipBackup(snapshot.url, to: matchDirectory)
             store?.load()
         } catch {
+            // The directory may now be in a half-deleted state; resync the
+            // store with disk so the UI doesn't show matches that are gone.
+            store?.load()
             showAlert(title: "Restore Failed", message: error.localizedDescription)
         }
     }
@@ -156,13 +162,18 @@ final class BackupManager {
                               "-x", "packages/*", "./packages/*"]
             proc.currentDirectoryURL = URL(fileURLWithPath: dirPath)
             let errPipe = Pipe()
-            proc.standardOutput = Pipe()
+            // zip prints one "adding:" line per entry; an undrained stdout pipe
+            // would block the child past ~64 KB and hang the wait. We don't
+            // consume stdout — discard it.
+            proc.standardOutput = FileHandle.nullDevice
             proc.standardError = errPipe
             try proc.run()
+            // Drain stderr to EOF *before* waiting, so a chatty failure can't
+            // fill the pipe buffer and block the child (see EspansoProcessManager.run).
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
             guard proc.terminationStatus == 0 else {
-                let msg = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(),
-                                 encoding: .utf8) ?? "Unknown error"
+                let msg = String(data: errData, encoding: .utf8) ?? "Unknown error"
                 throw NSError(domain: "BackupManager", code: 1,
                               userInfo: [NSLocalizedDescriptionKey: msg])
             }
@@ -181,13 +192,15 @@ final class BackupManager {
             proc.arguments = ["-o", srcPath, "-d", destPath,
                               "-x", "packages/*", "./packages/*"]
             let errPipe = Pipe()
-            proc.standardOutput = Pipe()
+            // unzip prints one "extracting:" line per entry; discard stdout so
+            // the pipe can never fill (see zipMatchDirectory).
+            proc.standardOutput = FileHandle.nullDevice
             proc.standardError = errPipe
             try proc.run()
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
             guard proc.terminationStatus == 0 else {
-                let msg = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(),
-                                 encoding: .utf8) ?? "Unknown error"
+                let msg = String(data: errData, encoding: .utf8) ?? "Unknown error"
                 throw NSError(domain: "BackupManager", code: 2,
                               userInfo: [NSLocalizedDescriptionKey: msg])
             }
@@ -196,13 +209,18 @@ final class BackupManager {
 
     // MARK: - Helpers
 
-    private func deleteUserMatchFiles() throws {
+    /// Internal for testing: replace-mode cleanup must remove every user match
+    /// file, so a restore starts from a clean slate.
+    func deleteUserMatchFiles() throws {
         let fm = FileManager.default
         let packagesPrefix = matchDirectory.appendingPathComponent("packages").path
         guard let enumerator = fm.enumerator(at: matchDirectory,
                                               includingPropertiesForKeys: nil) else { return }
         for case let url as URL in enumerator {
-            guard url.pathExtension == "yml" else { continue }
+            // Must cover both extensions espanso loads (see
+            // EspansoConfigStore.matchExtensions) — stale .yaml files would
+            // otherwise survive a replace-mode restore.
+            guard ["yml", "yaml"].contains(url.pathExtension) else { continue }
             guard !url.path.hasPrefix(packagesPrefix) else { continue }
             try fm.removeItem(at: url)
         }

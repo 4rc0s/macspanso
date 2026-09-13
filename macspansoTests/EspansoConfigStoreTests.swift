@@ -76,6 +76,31 @@ final class EspansoConfigStoreTests: XCTestCase {
 
     // MARK: - Watcher suppression after failed writes
 
+    func testAddRefusesParseErroredFile() throws {
+        // A file that fails to parse decodes to nothing in memory — writing
+        // into it would silently replace its unmodeled content on disk.
+        let broken = """
+        matches:
+          - trigger: "::a"
+            replace: [unclosed
+        """
+        try broken.write(to: dir.appendingPathComponent("broken.yml"),
+                         atomically: true, encoding: .utf8)
+        let store = EspansoConfigStore(matchDirectory: dir)
+        store.load()
+        let fileURL = dir.appendingPathComponent("broken.yml")
+
+        let match = EspansoMatch(trigger: "::b", replace: "B")
+        XCTAssertThrowsError(try store.add(match, to: fileURL)) { error in
+            XCTAssertEqual((error as NSError).domain, "macspanso.add")
+        }
+
+        // Nothing was written: the broken file is untouched on disk.
+        let onDisk = try String(contentsOf: fileURL, encoding: .utf8)
+        XCTAssertEqual(onDisk, broken)
+        XCTAssertEqual(store.allMatches.count, 0)
+    }
+
     func testExternalChangeStillDetectedAfterFailedWrite() throws {
         let store = try makeStore(yaml: """
         matches:

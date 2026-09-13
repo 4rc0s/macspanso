@@ -191,14 +191,18 @@ final class EspansoConfigStore: ObservableObject {
     }
 
     /// Add a new match. Saves to `targetURL` if provided; otherwise to base.yml.
-    /// Creates the file if it doesn't exist. Refuses to write into package files.
+    /// Creates the file if it doesn't exist. Refuses to write into package files
+    /// or files that failed to parse (a write would clobber their unmodeled content).
     func add(_ match: EspansoMatch, to targetURL: URL? = nil) throws {
         let url = targetURL ?? matchDirectory.appendingPathComponent("base.yml")
-        if let existing = matchFiles.first(where: { $0.url == url }), existing.isPackage {
+        if let existing = matchFiles.first(where: { $0.url == url }),
+           existing.isPackage || existing.parseError != nil {
             throw NSError(
                 domain: "macspanso.add",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Cannot add matches to a package file."]
+                userInfo: [NSLocalizedDescriptionKey: existing.isPackage
+                    ? "Cannot add matches to a package file."
+                    : "Cannot add matches to a file that failed to parse — fix its YAML first."]
             )
         }
         if let index = matchFiles.firstIndex(where: { $0.url == url }) {

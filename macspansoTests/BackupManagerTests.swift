@@ -74,4 +74,24 @@ final class BackupManagerTests: XCTestCase {
         return String(data: data, encoding: .utf8)?
             .components(separatedBy: "\n").filter { !$0.isEmpty } ?? []
     }
+
+    // MARK: - Replace-mode cleanup
+
+    func testDeleteUserMatchFilesCoversBothExtensions() throws {
+        // Replace-mode cleanup must remove .yaml files too — the store loads
+        // both extensions, so stale .yaml matches would otherwise survive a
+        // restore and leak into the restored state.
+        try "matches:\n  - trigger: \"::yaml\"\n    replace: Y\n"
+            .write(to: dir.appendingPathComponent("old.yaml"), atomically: true, encoding: .utf8)
+        let manager = BackupManager(matchDirectory: dir, store: EspansoConfigStore(matchDirectory: dir))
+
+        try manager.deleteUserMatchFiles()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("base.yml").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("old.yaml").path),
+            "stale .yaml match files must be removed by replace-mode cleanup")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: dir.appendingPathComponent("packages/somepkg/package.yml").path),
+            "package files must never be touched")
+    }
 }
