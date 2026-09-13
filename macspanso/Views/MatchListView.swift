@@ -290,7 +290,7 @@ struct MatchListView: View {
 
         Button("Delete", role: .destructive) {
             do {
-                try store.delete(matchID: matchID)
+                try store.deleteMatches([matchID])
                 selectedMatchIDs.remove(matchID)
             } catch {
                 deleteError = error.localizedDescription
@@ -329,13 +329,12 @@ struct MatchListView: View {
 
     private func deleteSelected() {
         let ids = selectedMatchIDs
-        var firstError: String?
-        for id in ids {
-            do { try store.delete(matchID: id) }
-            catch { firstError = firstError ?? error.localizedDescription }
-        }
         selectedMatchIDs = []
-        if let err = firstError { deleteError = err }
+        do {
+            try store.deleteMatches(ids)
+        } catch {
+            deleteError = error.localizedDescription
+        }
     }
 }
 
