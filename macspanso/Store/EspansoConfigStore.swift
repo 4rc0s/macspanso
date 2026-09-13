@@ -163,16 +163,6 @@ final class EspansoConfigStore: ObservableObject {
         try body()
     }
 
-    /// Save a mutated match list back to the file that owns it.
-    func save(matches: [EspansoMatch], in fileID: UUID) throws {
-        guard let index = matchFiles.firstIndex(where: { $0.id == fileID }) else { return }
-        let url = matchFiles[index].url
-        try suppressingWatcherEvents(for: url) {
-            try YAMLSerializer.write(fileContent(matches, for: url), to: url)
-        }
-        matchFiles[index].matches = matches
-    }
-
     /// Update a single match in place.
     func update(_ match: EspansoMatch) throws {
         for i in matchFiles.indices {
