@@ -324,7 +324,7 @@ private struct EmptyStateView: View {
                 Text("No matches yet")
                     .font(.title2)
                     .fontWeight(.semibold)
-                Text("Pick a starter below, or press ⌘N to create your own.")
+                Text("Pick a starter below, or press ⌃⇧N to create your own.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

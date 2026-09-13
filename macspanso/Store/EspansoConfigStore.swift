@@ -57,8 +57,10 @@ final class EspansoConfigStore: ObservableObject {
         matchFiles.forEach { watcher.watch(url: $0.url) }
     }
 
-    /// espanso v2 loads both extensions.
-    private static let matchExtensions: Set<String> = ["yml", "yaml"]
+    /// espanso v2 loads both extensions. Internal, not private: every path that
+    /// enumerates match files must agree on this set, or files get loaded but
+    /// never cleaned up (or vice versa). See BackupManager.deleteUserMatchFiles.
+    static let matchExtensions: Set<String> = ["yml", "yaml"]
 
     private func scanMatchDirectory() -> [URL] {
         guard let enumerator = FileManager.default.enumerator(

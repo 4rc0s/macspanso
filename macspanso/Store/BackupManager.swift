@@ -217,10 +217,9 @@ final class BackupManager {
         guard let enumerator = fm.enumerator(at: matchDirectory,
                                               includingPropertiesForKeys: nil) else { return }
         for case let url as URL in enumerator {
-            // Must cover both extensions espanso loads (see
-            // EspansoConfigStore.matchExtensions) — stale .yaml files would
-            // otherwise survive a replace-mode restore.
-            guard ["yml", "yaml"].contains(url.pathExtension) else { continue }
+            // Shares the loader's set rather than re-listing it: when these two
+            // drifted, stale .yaml files survived a replace-mode restore.
+            guard EspansoConfigStore.matchExtensions.contains(url.pathExtension) else { continue }
             guard !url.path.hasPrefix(packagesPrefix) else { continue }
             try fm.removeItem(at: url)
         }
