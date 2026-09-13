@@ -13,7 +13,9 @@ final class BackupManager {
     private static let backupType = UTType(filenameExtension: backupExtension) ?? .data
 
     init(matchDirectory: URL, store: EspansoConfigStore) {
-        self.matchDirectory = matchDirectory
+        // Canonicalize at the boundary, as EspansoConfigStore does, so paths
+        // derived from this URL compare equal to enumerated ones.
+        self.matchDirectory = matchDirectory.resolvingSymlinksInPath()
         self.store = store
     }
 
@@ -216,7 +218,16 @@ final class BackupManager {
         let packagesPrefix = matchDirectory.appendingPathComponent("packages").path
         guard let enumerator = fm.enumerator(at: matchDirectory,
                                               includingPropertiesForKeys: nil) else { return }
-        for case let url as URL in enumerator {
+        for case let entry as URL in enumerator {
+            // Normalize both sides before comparing, exactly as
+            // EspansoConfigStore.scanMatchDirectory does: enumeration yields
+            // /private/var/… for a symlinked root while packagesPrefix, derived
+            // via appendingPathComponent(_:), keeps /var/…. Note that
+            // resolvingSymlinksInPath() *strips* the /private prefix rather than
+            // adding it, so it must be applied to the entries too — resolving
+            // only the root leaves the prefix check failing every time, and
+            // replace-mode restore then deletes package files.
+            let url = entry.resolvingSymlinksInPath()
             // Shares the loader's set rather than re-listing it: when these two
             // drifted, stale .yaml files survived a replace-mode restore.
             guard EspansoConfigStore.matchExtensions.contains(url.pathExtension) else { continue }
