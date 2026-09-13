@@ -188,6 +188,33 @@ final class FileGroupingTests: XCTestCase {
             .matches.contains { $0.id == match.id } ?? false)
     }
 
+    func testWriteTargetsOutsideTheMatchDirectoryAreRefused() throws {
+        // Right extension, wrong place. espanso loads only what is under its own
+        // match folder, so a write here would succeed, show in the list until the
+        // next load, and then be gone — having never once expanded.
+        try writeMatchYAML("::a", to: dir.appendingPathComponent("a.yml"))
+        let store = load()
+        let match = try XCTUnwrap(store.allMatches.first)
+        // A sibling of the match directory, not a child of it.
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macspanso-outside-\(UUID().uuidString).yml")
+
+        XCTAssertThrowsError(
+            try store.add(EspansoMatch(trigger: "::e", replace: "Email"), to: outside)
+        ) { error in
+            XCTAssertEqual((error as NSError).domain, "macspanso.add")
+            XCTAssertTrue(error.localizedDescription.contains("outside"))
+        }
+        XCTAssertThrowsError(try store.move(matchID: match.id, to: outside))
+        XCTAssertThrowsError(try store.deleteFile(at: dir.appendingPathComponent("a.yml"),
+                                                  movingMatchesTo: outside))
+
+        // Every guard fires before any write.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outside.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("a.yml").path))
+        XCTAssertEqual(store.allMatches.count, 1)
+    }
+
     // MARK: - Shared search predicate
 
     func testSearchPredicateMatchesTriggerReplacementAndLabel() {
@@ -401,6 +428,30 @@ final class FileGroupingTests: XCTestCase {
         XCTAssertEqual(store.allMatches.count, 1)
     }
 
+    func testDeleteGroupCompensationRemovesADestinationItCreated() throws {
+        // The destination write lands, the source removal then fails. The
+        // destination did not exist before this call, so undoing it means
+        // removing it — rewriting it empty would leave a file nobody asked for.
+        try writeMatchYAML("::a", to: dir.appendingPathComponent("src.yml"))
+        let store = load()
+        let src = dir.appendingPathComponent("src.yml")
+        let dest = dir.appendingPathComponent("dest.yml")   // never loaded
+
+        // Immutable rather than a read-only directory: the destination write and
+        // the source removal both need a writable parent, so only a per-file
+        // flag can fail the second while letting the first succeed.
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: src.path)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: src.path) }
+
+        XCTAssertThrowsError(try store.deleteFile(at: src, movingMatchesTo: dest))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path),
+                       "a destination created only by the failed move must not be left behind")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: src.path))
+        XCTAssertEqual(store.matchFiles.map(\.displayName), ["src.yml"])
+        XCTAssertEqual(store.allMatches.count, 1)
+    }
+
     func testDeleteParseErroredGroupOutright() throws {
         try "matches:\n  - trigger: [unclosed\n"
             .write(to: dir.appendingPathComponent("broken.yml"), atomically: true, encoding: .utf8)
@@ -413,5 +464,47 @@ final class FileGroupingTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: broken.url.path))
         XCTAssertEqual(store.matchFiles.count, 1)
         XCTAssertEqual(store.allMatches.count, 1)
+    }
+
+    // MARK: - The external-edit notice survives group operations
+
+    // The banner names a URL. Renaming or deleting that group, or losing the
+    // file some other way, must not leave Reload pointing at a path that no
+    // longer resolves — Reload would then find nothing and silently do nothing,
+    // leaving a dead button and a banner only "Keep Mine" can dismiss.
+
+    func testReloadOfAFileNoLongerLoadedClearsTheNotice() throws {
+        try writeMatchYAML("::a", to: dir.appendingPathComponent("a.yml"))
+        let store = load()
+        let gone = dir.appendingPathComponent("gone.yml")
+        store.externallyChangedURL = gone
+
+        store.reloadFile(at: gone)
+
+        XCTAssertNil(store.externallyChangedURL,
+                     "Reload must dismiss the banner even when there is nothing to reload")
+    }
+
+    func testDeletingAGroupDismissesItsExternalEditNotice() throws {
+        try writeMatchYAML("::a", to: dir.appendingPathComponent("a.yml"))
+        try writeMatchYAML("::b", to: dir.appendingPathComponent("b.yml"))
+        let store = load()
+        let url = dir.appendingPathComponent("a.yml")
+        store.externallyChangedURL = url
+
+        try store.deleteFile(at: url)
+
+        XCTAssertNil(store.externallyChangedURL)
+    }
+
+    func testRenamingAGroupRepointsItsExternalEditNotice() throws {
+        try writeMatchYAML("::a", to: dir.appendingPathComponent("a.yml"))
+        let store = load()
+        store.externallyChangedURL = dir.appendingPathComponent("a.yml")
+
+        try store.renameFile(at: dir.appendingPathComponent("a.yml"), to: "b")
+
+        XCTAssertEqual(store.externallyChangedURL, dir.appendingPathComponent("b.yml"),
+                       "the edit is still unreloaded — the notice follows the file")
     }
 }

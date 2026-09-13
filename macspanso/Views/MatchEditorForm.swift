@@ -18,6 +18,10 @@ struct MatchEditorForm: View {
     @State private var triggerEntryIDs: [UUID] = []
     @State private var savedTriggers: [String]? = nil
     @State private var destinationURL: URL? = nil
+    /// True while `destinationURL` names a group the user asked to create but
+    /// that doesn't exist yet — the one case where a destination outside
+    /// `store.writableFiles` is legitimate. See `resolvedDestination`.
+    @State private var destinationIsNewGroup: Bool = false
     @State private var regexTestInput: String = ""
     /// Held as raw text rather than derived from `draft.searchTerms`: a binding that
     /// re-rendered the parsed array would swallow the comma as the user typed it,
@@ -136,10 +140,10 @@ struct MatchEditorForm: View {
                     ForEach(store.writableFiles, id: \.url) { file in
                         Text(store.displayLabel(for: file)).tag(Optional(file.url))
                     }
-                    // A destination chosen via New File… isn't in writableFiles
+                    // A destination chosen via New Group… isn't in writableFiles
                     // until it exists — without this item the picker renders
                     // blank and the choice the user just made looks lost.
-                    if let dest = destinationURL,
+                    if let dest = resolvedDestination,
                        !store.writableFiles.contains(where: { $0.url == dest }) {
                         Text(store.displayLabel(for: MatchFile(url: dest, matches: [], isPackage: false))
                                 + " (new group)").tag(Optional(dest))
@@ -178,12 +182,25 @@ struct MatchEditorForm: View {
         isNew ? nil : store.file(containing: draft.id)?.url
     }
 
+    /// The picked destination, dropped once it stops naming a real place to
+    /// write. `currentFileURL` is looked up live, but `destinationURL` is a URL
+    /// captured the moment the user touched the picker: rename or delete that
+    /// group while the form is open and Save would move the match to a path
+    /// that no longer exists, recreating the old file. A destination that isn't
+    /// a writable file is only kept while it is the pending new group, which by
+    /// definition doesn't exist yet.
+    private var resolvedDestination: URL? {
+        guard let destinationURL else { return nil }
+        if destinationIsNewGroup { return destinationURL }
+        return store.writableFiles.contains { $0.url == destinationURL } ? destinationURL : nil
+    }
+
     /// The group the match will live in after save. For a new match that's the
     /// picked destination (or base.yml); for an existing match it defaults to
     /// the file that already holds it.
     private var effectiveDestination: URL {
-        if isNew { return destinationURL ?? defaultDestination }
-        return destinationURL ?? currentFileURL ?? defaultDestination
+        if isNew { return resolvedDestination ?? defaultDestination }
+        return resolvedDestination ?? currentFileURL ?? defaultDestination
     }
 
     /// True when an existing match's group was changed in the picker — the
@@ -195,7 +212,12 @@ struct MatchEditorForm: View {
     private var destinationBinding: Binding<URL?> {
         Binding(
             get: { effectiveDestination },
-            set: { destinationURL = $0 }
+            set: { newValue in
+                // Picking anything other than the pending new group clears the
+                // flag; re-picking the new-group item itself leaves it armed.
+                if newValue != destinationURL { destinationIsNewGroup = false }
+                destinationURL = newValue
+            }
         )
     }
 
@@ -229,6 +251,7 @@ struct MatchEditorForm: View {
             // Coerce regardless — belt and braces against the panel returning
             // anything espanso wouldn't load.
             destinationURL = Self.withYMLExtension(url)
+            destinationIsNewGroup = true
         }
     }
 
@@ -709,7 +732,7 @@ struct MatchEditorForm: View {
         }
         do {
             if isNew {
-                let target = destinationURL ?? defaultDestination
+                let target = effectiveDestination
                 try store.add(matchToSave, to: target)
                 Preferences.shared.lastDestinationFilePath = target.path
             } else {

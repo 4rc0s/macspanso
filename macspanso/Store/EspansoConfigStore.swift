@@ -185,19 +185,10 @@ final class EspansoConfigStore: ObservableObject {
     /// Add a new match. Saves to `targetURL` if provided; otherwise to base.yml.
     /// Creates the file if it doesn't exist. Refuses to write into package files
     /// or files that failed to parse (a write would clobber their unmodeled content),
-    /// and refuses targets espanso would never load — a file written under any
-    /// other name is invisible in this app and in espanso alike.
+    /// and refuses targets espanso would never load — see `validateWriteTarget`.
     func add(_ match: EspansoMatch, to targetURL: URL? = nil) throws {
         let url = targetURL ?? matchDirectory.appendingPathComponent("base.yml")
-        guard Self.matchExtensions.contains(url.pathExtension) else {
-            throw NSError(
-                domain: "macspanso.add",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey:
-                    "“\(url.lastPathComponent)” is missing the .yml extension — "
-                    + "espanso only loads .yml and .yaml files, so it would never be visible."]
-            )
-        }
+        try validateWriteTarget(url, domain: "macspanso.add")
         if let existing = matchFiles.first(where: { $0.url == url }),
            existing.isPackage || existing.parseError != nil {
             throw NSError(
@@ -292,6 +283,38 @@ final class EspansoConfigStore: ObservableObject {
         let path = url.path
         guard path.hasPrefix(root + "/") else { return nil }
         return String(path.dropFirst(root.count + 1))
+    }
+
+    /// Guard for any file the user names as a write target. espanso loads only
+    /// `.yml`/`.yaml`, and only from under the match directory — a file written
+    /// under any other name, or anywhere else on disk, is invisible in this app
+    /// and in espanso alike. The write itself succeeds, so without this guard
+    /// the match appears in the list until the next `load()` and is then gone,
+    /// having never once expanded.
+    ///
+    /// Containment resolves symlinks on the candidate because `init` resolved
+    /// the root: normalizing one operand only would guarantee the mismatch it
+    /// was meant to prevent (see the URL-identity notes on `scanMatchDirectory`).
+    private func validateWriteTarget(_ url: URL, domain: String) throws {
+        guard Self.matchExtensions.contains(url.pathExtension) else {
+            throw NSError(
+                domain: domain,
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "“\(url.lastPathComponent)” is missing the .yml extension — "
+                    + "espanso only loads .yml and .yaml files, so it would never be visible."]
+            )
+        }
+        guard pathRelativeToRoot(for: url.resolvingSymlinksInPath()) != nil else {
+            throw NSError(
+                domain: domain,
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "“\(url.lastPathComponent)” is outside the espanso match folder — "
+                    + "espanso only loads files under \(matchDirectory.path), "
+                    + "so it would never be visible."]
+            )
+        }
     }
 
     /// One occurrence of a trigger string in a specific match within a specific file.
@@ -397,15 +420,7 @@ final class EspansoConfigStore: ObservableObject {
     /// Refuses to move into package files or files with parse errors, and refuses
     /// targets espanso would never load (see `add(_:to:)`).
     func move(matchID: UUID, to targetURL: URL) throws {
-        guard Self.matchExtensions.contains(targetURL.pathExtension) else {
-            throw NSError(
-                domain: "macspanso.move",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey:
-                    "“\(targetURL.lastPathComponent)” is missing the .yml extension — "
-                    + "espanso only loads .yml and .yaml files, so it would never be visible."]
-            )
-        }
+        try validateWriteTarget(targetURL, domain: "macspanso.move")
         // Locate the source file and match
         guard let sourceIndex = matchFiles.firstIndex(where: { f in
                   f.matches.contains(where: { $0.id == matchID })
@@ -548,6 +563,11 @@ final class EspansoConfigStore: ObservableObject {
             matchFiles.sort { $0.url.path < $1.url.path }
             watcher.stopWatching(url: url)
             watcher.watch(url: newURL)
+            // An unanswered external-edit banner names a path that no longer
+            // exists: Reload would find nothing and silently do nothing. The
+            // edit is still unreloaded, so re-point the notice rather than
+            // dropping it.
+            if externallyChangedURL == url { externallyChangedURL = newURL }
         }
     }
 
@@ -578,11 +598,7 @@ final class EspansoConfigStore: ObservableObject {
         // outright delete.
         let target: URL? = (targetURL == url || source.matches.isEmpty) ? nil : targetURL
         if let target {
-            if !Self.matchExtensions.contains(target.pathExtension) {
-                throw NSError(domain: "macspanso.deleteGroup", code: 4,
-                              userInfo: [NSLocalizedDescriptionKey:
-                            "“\(target.lastPathComponent)” is not a match file."])
-            }
+            try validateWriteTarget(target, domain: "macspanso.deleteGroup")
             if let dest = matchFiles.first(where: { $0.url == target }),
                dest.isPackage || dest.parseError != nil {
                 throw NSError(domain: "macspanso.deleteGroup", code: 5,
@@ -606,12 +622,18 @@ final class EspansoConfigStore: ObservableObject {
                     try FileManager.default.removeItem(atPath: url.path)
                 }
             } catch {
-                // Removal failed after the destination write: strip the appended
-                // matches back out so they exist in one file, not two.
+                // Removal failed after the destination write: put the destination
+                // back the way it was so the matches exist in one file, not two.
+                // A destination that wasn't a loaded file was created by the write
+                // just above, so undoing it means removing it — rewriting it with
+                // no matches would leave an empty file the user never asked for.
                 try? suppressingWatcherEvents(for: target) {
-                    try YAMLSerializer.write(
-                        fileContent(destIndex.map { matchFiles[$0].matches } ?? [], for: target),
-                        to: target)
+                    if let destIndex {
+                        try YAMLSerializer.write(
+                            fileContent(matchFiles[destIndex].matches, for: target), to: target)
+                    } else {
+                        try FileManager.default.removeItem(atPath: target.path)
+                    }
                 }
                 throw error
             }
@@ -633,6 +655,9 @@ final class EspansoConfigStore: ObservableObject {
         // Commit: drop the source from memory and stop watching it.
         matchFiles.remove(at: index)
         watcher.stopWatching(url: url)
+        // The file this banner refers to is gone, so Reload has nothing to
+        // read — dismiss the notice rather than leaving a dead button.
+        if externallyChangedURL == url { externallyChangedURL = nil }
     }
 
     /// Returns the MatchFile that owns a given match ID.
@@ -683,7 +708,14 @@ final class EspansoConfigStore: ObservableObject {
 
     /// Called when the user chooses "Reload" in the external edit banner.
     func reloadFile(at url: URL) {
-        guard let index = matchFiles.firstIndex(where: { $0.url == url }) else { return }
+        guard let index = matchFiles.firstIndex(where: { $0.url == url }) else {
+            // The file went away between the banner appearing and Reload being
+            // pressed (deleted externally, or by deleteFile). There is nothing
+            // to reload, but the notice must still clear — otherwise Reload is
+            // a dead button and only "Keep Mine" dismisses the banner.
+            externallyChangedURL = nil
+            return
+        }
         let previous = matchFiles[index].matches
         matchFiles[index] = loadFile(at: url, reusingIDsFrom: previous)
         externallyChangedURL = nil
