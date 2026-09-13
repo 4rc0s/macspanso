@@ -446,13 +446,35 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// for an accessory app the window can otherwise open behind the
     /// frontmost app. The window doesn't flip the activation policy the way
     /// the Match Manager does — it's a utility, not a place the user lives.
+    ///
+    /// This drives the app menu's own Settings item rather than sending
+    /// `showSettingsWindow:`. That selector *resolves* — SwiftUI's internal
+    /// app delegate answers it and `sendAction` returns true — but on macOS 26
+    /// nothing opens, so the menu click was a silent no-op. The item SwiftUI
+    /// actually wires to the scene carries a `menuAction:` callback, and
+    /// performing it opens the window on every OS version that builds the
+    /// menu at all.
     @objc private func openSettings() {
         NSApp.activate(ignoringOtherApps: true)
-        // The selector is SwiftUI's private responder for the Settings scene.
-        // It has held since macOS 13, but nothing guarantees it; a failed
-        // dispatch must not be a silent no-op on a menu click.
-        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-            NSLog("Settings: no responder handled showSettingsWindow:")
+        guard let appMenu = NSApp.mainMenu?.item(at: 0)?.submenu,
+              let index = Self.settingsItemIndex(in: appMenu) else {
+            NSLog("Settings: no ⌘, item found in the app menu")
+            return
+        }
+        appMenu.performActionForItem(at: index)
+    }
+
+    /// Index of the Settings item in the application menu, or nil.
+    ///
+    /// Matched on the ⌘, key equivalent, not the title: SwiftUI localizes the
+    /// title and renamed it from "Preferences…" to "Settings…" in macOS 13.
+    /// A separator or a disabled placeholder carries no target, so the target
+    /// check keeps this from finding one.
+    static func settingsItemIndex(in menu: NSMenu) -> Int? {
+        menu.items.firstIndex {
+            $0.keyEquivalent == ","
+                && $0.keyEquivalentModifierMask == .command
+                && $0.target != nil
         }
     }
 }
