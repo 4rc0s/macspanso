@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.7.0] - 2026-09-13
 
 ### Added
 - **Match labels** — a match can now be given a name, shown beside its trigger in the list. The match list and the Quick Switcher have always searched labels, but there was no way to set one short of editing YAML by hand; espanso shows the label in its own search bar too.
