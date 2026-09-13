@@ -6,6 +6,7 @@ public enum ValidationError: Equatable {
     case duplicateTrigger
     case unresolvedVarReference(String)  // var name
     case duplicateVarName(String)         // var name
+    case invalidVarName(String)           // var name
     case emptyShellCmd
     case emptyFormTemplate
 }
@@ -75,6 +76,16 @@ public enum MatchValidator {
         for name in (match.vars ?? []).map(\.name) { nameFreq[name, default: 0] += 1 }
         for (name, count) in nameFreq where count > 1 {
             errors.append(.duplicateVarName(name))
+        }
+
+        // Var names must be referenceable: espanso's interpolation regex only matches
+        // \w+, so a name like `short-date` can never be used — {{short-date}} passes
+        // through as literal text. Applied to declared names only; a hyphenated token
+        // in the replace text is passed through by espanso deliberately (it may be
+        // wanted literally), so it is not an error here.
+        let validName = #/^\w+$/#
+        for name in (match.vars ?? []).map(\.name) where name.contains(validName) == false {
+            errors.append(.invalidVarName(name))
         }
 
         // Shell vars must have a non-empty cmd

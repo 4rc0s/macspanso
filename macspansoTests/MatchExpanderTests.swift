@@ -102,3 +102,35 @@ extension MatchExpanderTests {
         XCTAssertEqual(MatchExpander.preview(of: dateMatch(format: "%Y-%m-%d")), expected)
     }
 }
+
+// MARK: - Interpolation fidelity (mirror espanso's \w+ reference regex)
+
+extension MatchExpanderTests {
+
+    func testHyphenatedVarNameStaysRawLikeEspanso() {
+        // espanso's interpolation regex is \w+ only, so {{short-date}} is passed
+        // through as literal text — the preview must not substitute it.
+        let m = EspansoMatch(
+            trigger: ";sdat",
+            replace: "{{short-date}}",
+            vars: [EspansoVar(name: "short-date", type: .date, params: ["format": .string("%Y")])]
+        )
+        XCTAssertEqual(MatchExpander.preview(of: m), "{{short-date}}")
+    }
+
+    func testWhitespaceInsideBracesStillInterpolates() {
+        // espanso's regex allows {{\s*name\s*}} — the preview must agree.
+        let m = EspansoMatch(
+            trigger: "::y",
+            replace: "{{ y }}",
+            vars: [EspansoVar(name: "y", type: .date, params: ["format": .string("%Y")])]
+        )
+        let year = Calendar.current.component(.year, from: Date())
+        XCTAssertEqual(MatchExpander.preview(of: m), "\(year)")
+    }
+
+    func testUndeclaredValidNameStaysRaw() {
+        let m = EspansoMatch(trigger: "::x", replace: "{{unknown}}")
+        XCTAssertEqual(MatchExpander.preview(of: m), "{{unknown}}")
+    }
+}

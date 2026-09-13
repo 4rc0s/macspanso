@@ -8,6 +8,7 @@ DerivedData/
 # Xcode user state (per-developer, not shared)
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
+buildServer.json
 *.xcworkspace/contents.xcworkspacedata
 *.pbxuser
 !default.pbxuser

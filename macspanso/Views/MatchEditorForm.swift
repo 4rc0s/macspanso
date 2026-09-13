@@ -395,6 +395,20 @@ struct MatchEditorForm: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+
+                ForEach(invalidVarNames, id: \.self) { name in
+                    Label("Variable name '\(name)' is invalid — espanso can only reference letters, digits, and underscores", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                ForEach(duplicateVarNames, id: \.self) { name in
+                    Label("Variable name '\(name)' is used more than once", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                validationLabel(for: .emptyShellCmd, message: "Shell variable needs a command")
             }
 
             previewSection
@@ -594,6 +608,20 @@ struct MatchEditorForm: View {
     private var unresolvedVarErrors: [String] {
         validationErrors.compactMap {
             if case .unresolvedVarReference(let name) = $0 { return name }
+            return nil
+        }
+    }
+
+    private var invalidVarNames: [String] {
+        validationErrors.compactMap {
+            if case .invalidVarName(let name) = $0 { return name }
+            return nil
+        }
+    }
+
+    private var duplicateVarNames: [String] {
+        validationErrors.compactMap {
+            if case .duplicateVarName(let name) = $0 { return name }
             return nil
         }
     }

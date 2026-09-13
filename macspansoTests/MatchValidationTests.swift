@@ -106,3 +106,38 @@ extension MatchValidationTests {
         XCTAssertEqual(errors, [.unresolvedVarReference("nope")])
     }
 }
+
+// MARK: - Var name validity (espanso can only reference \w+ names)
+
+extension MatchValidationTests {
+
+    func testHyphenatedVarNameIsInvalid() {
+        // espanso's interpolation regex is \w+ — {{short-date}} can never resolve.
+        let match = EspansoMatch(
+            trigger: ";sdat",
+            replace: "{{short-date}}",
+            vars: [EspansoVar(name: "short-date", type: .date)]
+        )
+        let errors = MatchValidator.validate(match, existingMatches: [])
+        XCTAssertTrue(errors.contains(.invalidVarName("short-date")))
+    }
+
+    func testUnderscoredVarNameIsValid() {
+        let match = EspansoMatch(
+            trigger: ";sdat",
+            replace: "{{short_date}}",
+            vars: [EspansoVar(name: "short_date", type: .date)]
+        )
+        let errors = MatchValidator.validate(match, existingMatches: [])
+        XCTAssertTrue(errors.isEmpty, "valid name flagged: \(errors)")
+    }
+
+    func testHyphenatedTokenInReplaceTextAloneIsNotAnError() {
+        // No var declared: {{short-date}} is not extracted as a reference (espanso's
+        // regex never matches it) and is passed through as literal text, which the
+        // user may want — so it must not block saving.
+        let match = EspansoMatch(trigger: ";lit", replace: "{{short-date}}")
+        let errors = MatchValidator.validate(match, existingMatches: [])
+        XCTAssertTrue(errors.isEmpty, "literal text flagged: \(errors)")
+    }
+}

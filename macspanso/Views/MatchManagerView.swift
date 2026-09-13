@@ -106,7 +106,7 @@ struct MatchManagerView: View {
             if let changedURL = store.externallyChangedURL {
                 ExternalEditBanner(
                     filename: changedURL.lastPathComponent,
-                    onReload: { store.reloadFile(at: changedURL) },
+                    onReload: { reloadExternallyChangedFile(changedURL) },
                     onKeep: { store.dismissExternalChangeNotice() }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -116,6 +116,24 @@ struct MatchManagerView: View {
     }
 
     // MARK: - Editor panel
+
+    /// Reload replaces the on-disk content everywhere the UI shows it. The match
+    /// list reads the store directly, but the open editor seeds its draft from the
+    /// match only when the view identity changes — and a reloaded match keeps its
+    /// UUID (`reassociateIDs`), so a form left open on the edited match would keep
+    /// the pre-reload content in its Replacement and Variables boxes while the
+    /// list and disk show the new one, with `isDirty` turned on by nothing the
+    /// user did. Re-keying the editor after reloading the file it edits gives the
+    /// form the same fresh init a save does. In-progress edits are discarded —
+    /// that is what Reload promises; "Keep Mine" is the choice that leaves the
+    /// editor untouched.
+    private func reloadExternallyChangedFile(_ url: URL) {
+        if let id = selectedMatchIDs.first, selectedMatchIDs.count == 1,
+           store.file(containing: id)?.url == url {
+            editorGeneration += 1
+        }
+        store.reloadFile(at: url)
+    }
 
     @ViewBuilder
     private var editorPanel: some View {

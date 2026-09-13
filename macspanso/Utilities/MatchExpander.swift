@@ -13,8 +13,16 @@ public enum MatchExpander {
 
         // Substitute declared variables before form placeholders so a var named the same
         // as a form field does not get rewritten — but in practice form mode has no vars.
-        for v in match.vars ?? [] {
-            output = output.replacingOccurrences(of: "{{\(v.name)}}", with: resolve(v))
+        // Interpolation mirrors espanso's own regex (`\w+` names, optional surrounding
+        // whitespace): a token like `{{short-date}}` never matches it, so espanso passes
+        // it through as literal text and the preview must show it raw.
+        let declaredVars = (match.vars ?? [])
+        let varRef = /\{\{\s*(\w+)\s*\}\}/
+        output = output.replacing(varRef) { m in
+            guard let v = declaredVars.first(where: { $0.name == m.1 }) else {
+                return String(m.0)
+            }
+            return resolve(v)
         }
 
         if match.form != nil {
