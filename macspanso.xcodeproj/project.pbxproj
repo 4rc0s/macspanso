@@ -23,9 +23,9 @@
 		61EDF930BF4D96D560F18CF8 /* BackupManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 617A9D23BF90860C85909EC2 /* BackupManagerTests.swift */; };
 		6434EB61ADEEE00F6CFC0DF7 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02EA671901CA4DAFC1F75E0C /* DiagnosticsView.swift */; };
 		674DE122D0A6EEB69B24E606 /* YAMLSerializer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5052F737DE80E9307D1A5CD /* YAMLSerializer.swift */; };
-		696BCB15E435EF5A3CD05E4E /* GlobalHotkeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AFE3FD968360C7640F38264 /* GlobalHotkeys.swift */; };
 		6A5A359E1C1F69C6BBFA28BB /* FileWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB8530FDA5F7A4FF993B443 /* FileWatcher.swift */; };
 		768E48825C5596A69267F879 /* FileTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0882C2FC91DCC46DD6BC48EE /* FileTreeView.swift */; };
+		7BD88252DD4247BFE84FB9F5 /* Shortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B5EB9E42850D1B7D8EFBC5 /* Shortcuts.swift */; };
 		7DBA6F75EEA2397E14800BA1 /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D9311AD3CA4F25DF3E49BF7 /* MenuBarController.swift */; };
 		8088A487EDAFF5DEF6CD69E5 /* logo-sm.png in Resources */ = {isa = PBXBuildFile; fileRef = 48296F73242EFFBEAF516FEC /* logo-sm.png */; };
 		81D985B3200D4ED0CD6F10E5 /* MatchValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 197269D9A01D91DFA8FDD98B /* MatchValidationTests.swift */; };
@@ -57,6 +57,7 @@
 		E6992F88EDDAE0B39C74A914 /* MatchValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F15E7CE6C04870BF8BD59FD /* MatchValidator.swift */; };
 		EB11099E32AB2AF21663ADF3 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70FA31CC02022AE2267674F3 /* UpdateChecker.swift */; };
 		F111131E613F5C6CC4F8BBBC /* MatchFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BFC9A2FF067F185C8063123 /* MatchFile.swift */; };
+		FC7AA6225699E9252DE7F165 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = ACC836039ED0B9F03686F9E6 /* KeyboardShortcuts */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,6 +75,7 @@
 		0882C2FC91DCC46DD6BC48EE /* FileTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeView.swift; sourceTree = "<group>"; };
 		0C878548B9B683C2270B1273 /* FormFieldsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormFieldsSection.swift; sourceTree = "<group>"; };
 		0F2E60463216EC9368B4ABC6 /* EspansoProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EspansoProcessManager.swift; sourceTree = "<group>"; };
+		11B5EB9E42850D1B7D8EFBC5 /* Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shortcuts.swift; sourceTree = "<group>"; };
 		142ED47EF8B3DEC59AE059EC /* TriggerModeTransition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriggerModeTransition.swift; sourceTree = "<group>"; };
 		197269D9A01D91DFA8FDD98B /* MatchValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchValidationTests.swift; sourceTree = "<group>"; };
 		1B9CF37AC7F49D20F5E7DFE9 /* EspansoMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EspansoMatch.swift; sourceTree = "<group>"; };
@@ -95,7 +97,6 @@
 		6750794A19508E640DB18607 /* MatchManagerWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchManagerWindow.swift; sourceTree = "<group>"; };
 		7079D876C9FD81D8E9087C4C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		70FA31CC02022AE2267674F3 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
-		7AFE3FD968360C7640F38264 /* GlobalHotkeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeys.swift; sourceTree = "<group>"; };
 		7D101A2C6D185C3EC5C0BC8D /* macspanso.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = macspanso.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D7EBB169B203D1E23937442 /* ViewStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewStubs.swift; sourceTree = "<group>"; };
 		8509E46B021A8471FDA9983C /* YAMLAny.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YAMLAny.swift; sourceTree = "<group>"; };
@@ -137,6 +138,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8ECA817CBF7170DADD934DDA /* Yams in Frameworks */,
+				FC7AA6225699E9252DE7F165 /* KeyboardShortcuts in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -231,10 +233,10 @@
 			isa = PBXGroup;
 			children = (
 				A0E594E96E837F06FCDA74BD /* AppDelegate.swift */,
-				7AFE3FD968360C7640F38264 /* GlobalHotkeys.swift */,
 				42053EE2AEEB31EC83CE7EAA /* Info.plist */,
 				F73300D0AA66B88477808373 /* macspansoApp.swift */,
 				46ACC94088C590B28D8D76AA /* MacspansoIntents.swift */,
+				11B5EB9E42850D1B7D8EFBC5 /* Shortcuts.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -310,6 +312,7 @@
 			name = macspanso;
 			packageProductDependencies = (
 				5FB62BECB934B23CAC5FA023 /* Yams */,
+				ACC836039ED0B9F03686F9E6 /* KeyboardShortcuts */,
 			);
 			productName = macspanso;
 			productReference = 7D101A2C6D185C3EC5C0BC8D /* macspanso.app */;
@@ -343,6 +346,7 @@
 			mainGroup = 63B5EC8AEA3396D76B53A67D;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				D19BE8E6E783342A81690052 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
 				1C4E8C4E79EDD11AE79F2439 /* XCRemoteSwiftPackageReference "Yams" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -386,7 +390,6 @@
 				6A5A359E1C1F69C6BBFA28BB /* FileWatcher.swift in Sources */,
 				945285C3E38182EB610CD985 /* FormField.swift in Sources */,
 				47B4E2B111B9796B49C8AA34 /* FormFieldsSection.swift in Sources */,
-				696BCB15E435EF5A3CD05E4E /* GlobalHotkeys.swift in Sources */,
 				3855893A74AAF9935C0EC172 /* LogViewer.swift in Sources */,
 				BFD632A8CEC8466D2AABA911 /* MacspansoIntents.swift in Sources */,
 				9BCBA5C7D6166D802CA1F54D /* MatchEditorForm.swift in Sources */,
@@ -399,6 +402,7 @@
 				7DBA6F75EEA2397E14800BA1 /* MenuBarController.swift in Sources */,
 				AE980D1D7FFA81D68D8AD70D /* Preferences.swift in Sources */,
 				C79B3B36F017FA388F31A648 /* QuickSwitcherView.swift in Sources */,
+				7BD88252DD4247BFE84FB9F5 /* Shortcuts.swift in Sources */,
 				3675C46258E205B3A46814B7 /* TriggerModeTransition.swift in Sources */,
 				EB11099E32AB2AF21663ADF3 /* UpdateChecker.swift in Sources */,
 				83CE32541305E31383616EE5 /* VariableBuilderView.swift in Sources */,
@@ -676,6 +680,14 @@
 				minimumVersion = 5.0.6;
 			};
 		};
+		D19BE8E6E783342A81690052 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sindresorhus/KeyboardShortcuts";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -683,6 +695,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1C4E8C4E79EDD11AE79F2439 /* XCRemoteSwiftPackageReference "Yams" */;
 			productName = Yams;
+		};
+		ACC836039ED0B9F03686F9E6 /* KeyboardShortcuts */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D19BE8E6E783342A81690052 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;
+			productName = KeyboardShortcuts;
 		};
 		F5A008572CFB07101C8342C3 /* Yams */ = {
 			isa = XCSwiftPackageProductDependency;

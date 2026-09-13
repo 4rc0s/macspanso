@@ -2,6 +2,7 @@
 import AppKit
 import Combine
 import ServiceManagement
+import KeyboardShortcuts
 
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
@@ -13,7 +14,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var windowController: MatchManagerWindowController?
     private let backupManager: BackupManager
     private let updateChecker: UpdateChecker
-    private let globalHotkeys = GlobalHotkeyController()
     private var didCreateSessionSnapshot = false
 
     private static let espansoURL = URL(string: "https://espanso.org")!
@@ -52,9 +52,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
 
         // System-wide: summon the manager (or a new-match draft) from any app.
-        globalHotkeys.install(
-            onOpenManager: { [weak self] in self?.showMatchManager(focus: .none) },
-            onNewMatch:    { [weak self] in self?.showMatchManager(focus: .newMatch) })
+        // Key-down rather than key-up keeps the press-to-fire feel of the
+        // original Carbon registration. Combos are defined in Shortcuts.swift
+        // and changed by the user in Settings → Shortcuts.
+        KeyboardShortcuts.onKeyDown(for: .openManager) { [weak self] in
+            self?.showMatchManager(focus: .none)
+        }
+        KeyboardShortcuts.onKeyDown(for: .newMatch) { [weak self] in
+            self?.showMatchManager(focus: .newMatch)
+        }
     }
 
     /// Rebuild just before the menu opens so the snapshot list and
@@ -63,6 +69,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         updateChecker.checkIfStale()
         buildMenu()
+    }
+
+    /// While the menu is open its own key equivalents handle the combos; the
+    /// global registrations would otherwise fire as well (KeyboardShortcuts'
+    /// documented pattern). Must not rebuild the menu here.
+    func menuWillOpen(_ menu: NSMenu) {
+        KeyboardShortcuts.disable(.openManager, .newMatch)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        KeyboardShortcuts.enable(.openManager, .newMatch)
     }
 
     private func configureIcon() {
@@ -113,15 +130,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             item.target = self
             menu.addItem(item)
         } else {
+            // Key equivalents mirror the user's global shortcuts so the menu
+            // never advertises a combo that doesn't fire.
             let openItem = NSMenuItem(title: "Open Match Manager…",
-                                      action: #selector(openMatchManager), keyEquivalent: "m")
-            openItem.keyEquivalentModifierMask = [.control, .shift]
+                                      action: #selector(openMatchManager), keyEquivalent: "")
+            openItem.setShortcut(for: .openManager)
             openItem.target = self
             menu.addItem(openItem)
 
             let newItem = NSMenuItem(title: "New Match…",
-                                     action: #selector(newMatch), keyEquivalent: "n")
-            newItem.keyEquivalentModifierMask = [.control, .shift]
+                                     action: #selector(newMatch), keyEquivalent: "")
+            newItem.setShortcut(for: .newMatch)
             newItem.target = self
             menu.addItem(newItem)
 

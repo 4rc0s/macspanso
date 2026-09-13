@@ -1,5 +1,6 @@
 // macspanso/Views/MatchManagerView.swift
 import SwiftUI
+import KeyboardShortcuts
 
 private enum AppTab { case matches, about }
 
@@ -268,6 +269,15 @@ private struct BulkActionPanel: View {
 }
 
 private struct EmptyStateView: View {
+    /// The hotkey is user-configurable (Settings → Shortcuts) and may be
+    /// cleared entirely, so the hint reads the live value.
+    private static var newMatchHint: String {
+        if let shortcut = KeyboardShortcuts.getShortcut(for: .newMatch) {
+            return "press \(shortcut)"
+        }
+        return "choose New Match… from the menu bar"
+    }
+
     @ObservedObject var store: EspansoConfigStore
     let onCreated: (UUID) -> Void
     @State private var creationError: String?
@@ -324,7 +334,7 @@ private struct EmptyStateView: View {
                 Text("No matches yet")
                     .font(.title2)
                     .fontWeight(.semibold)
-                Text("Pick a starter below, or press ⌃⇧N to create your own.")
+                Text("Pick a starter below, or \(Self.newMatchHint) to create your own.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
