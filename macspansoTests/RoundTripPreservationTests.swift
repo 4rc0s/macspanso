@@ -4,7 +4,7 @@ import XCTest
 
 /// Editing a match through macspanso must not destroy YAML content the app
 /// doesn't model: top-level keys like `global_vars:` and per-match keys like
-/// `markdown:` or `priority:` must survive a decode→encode round trip.
+/// `markdown:` or `image_path:` must survive a decode→encode round trip.
 final class RoundTripPreservationTests: XCTestCase {
 
     func testGlobalVarsSurviveRoundTrip() throws {
@@ -145,5 +145,145 @@ extension RoundTripPreservationTests {
         let store = EspansoConfigStore(matchDirectory: dir)
         store.load()
         XCTAssertEqual(store.globalVarNames, ["city", "signoff"])
+    }
+}
+
+// MARK: - YAML anchors and aliases (known limitation)
+
+extension RoundTripPreservationTests {
+
+    /// espanso documents `anchors:` + YAML aliases as the compact way to share one
+    /// script across several matches:
+    /// https://espanso.org/docs/matches/extensions/#anchors-and-aliases
+    ///
+    /// Yams resolves aliases while composing the node graph and keeps no record of
+    /// the anchor name, so a decode→encode round trip inlines every `*ref`. The file
+    /// stays *semantically* identical — espanso resolves the same aliases — but the
+    /// shared definition is copied into every use site, which is exactly the kind of
+    /// hand-authored structure `extras` exists to protect.
+    ///
+    /// Pinned with `XCTExpectFailure` rather than deleted: it is executable
+    /// documentation, and it turns red the moment someone makes aliases survive, so
+    /// the limitation note in CLAUDE.md gets removed at the same time.
+    func testYAMLAliasesAreInlinedOnRoundTrip() throws {
+        let yaml = """
+        anchors:
+          script1: &script1 |
+            fruits = ["apple", "banana"]
+            for x in fruits:
+              print(x)
+
+        matches:
+          - trigger: ":one"
+            replace: "{{output}}"
+            vars:
+              - name: output
+                type: script
+                params:
+                  args: [python, -c, *script1]
+          - trigger: ":two"
+            replace: "{{output}}"
+            vars:
+              - name: output
+                type: script
+                params:
+                  args: [python, -c, *script1]
+        """
+        let content = try YAMLSerializer.decodeContent(yaml: yaml)
+        let out = try YAMLSerializer.encode(content)
+
+        // What does hold: the anchors block and the script body both survive, so the
+        // file still behaves identically under espanso.
+        XCTAssertTrue(out.contains("anchors"), "anchors key must survive: \(out)")
+        XCTAssertTrue(out.contains("fruits"), "the shared script body must survive: \(out)")
+
+        // What does not: the anchor/alias syntax is gone and the body is duplicated
+        // once per use site plus the definition.
+        XCTAssertEqual(out.components(separatedBy: "banana").count - 1, 3,
+            "the shared body is currently inlined at every use site: \(out)")
+
+        XCTExpectFailure("Yams resolves aliases at parse time — see CLAUDE.md, 'YAML anchors are not preserved'") {
+            XCTAssertTrue(out.contains("&script1"), "anchor definition should survive: \(out)")
+            XCTAssertTrue(out.contains("*script1"), "alias should not be expanded: \(out)")
+        }
+    }
+}
+
+// MARK: - Newly modelled espanso keys
+//
+// The authoritative key list is espanso's schemas/match.schema.json, which sets
+// additionalProperties: false. A property added to EspansoMatch without a matching
+// CodingKeys case is decoded *and* copied into extras, so it gets written twice —
+// `testKnownKeysNotDuplicatedIntoExtras` and the extras check below guard that.
+
+extension RoundTripPreservationTests {
+
+    func testAdvancedKeysAreModelledNotExtras() throws {
+        let yaml = """
+        matches:
+          - trigger: "::sig"
+            replace: Best regards
+            label: Sign-off
+            left_word: true
+            right_word: true
+            uppercase_style: capitalize_words
+            force_mode: clipboard
+            search_terms:
+              - signoff
+              - regards
+            comment: Used at the end of emails
+        """
+        let match = try XCTUnwrap(try YAMLSerializer.decode(yaml: yaml).first)
+
+        XCTAssertEqual(match.label, "Sign-off")
+        XCTAssertEqual(match.leftWord, true)
+        XCTAssertEqual(match.rightWord, true)
+        XCTAssertEqual(match.uppercaseStyle, "capitalize_words")
+        XCTAssertEqual(match.forceMode, "clipboard")
+        XCTAssertEqual(match.searchTerms, ["signoff", "regards"])
+        XCTAssertEqual(match.comment, "Used at the end of emails")
+        XCTAssertTrue(match.extras.isEmpty,
+            "modelled keys must not leak into extras: \(match.extras)")
+
+        // And they must come back out unchanged.
+        var again = try XCTUnwrap(
+            try YAMLSerializer.decode(yaml: try YAMLSerializer.encode([match])).first)
+        // `id` is minted at decode time and deliberately never serialized, so align
+        // it before comparing every other field at once.
+        again.id = match.id
+        XCTAssertEqual(again, match)
+    }
+
+    func testUntouchedOptionalKeysAreNotEmitted() throws {
+        // espanso omits what it doesn't need. Writing `false` or `""` would add keys
+        // the user never asked for and churn the file on every save.
+        let match = EspansoMatch(trigger: "::x", replace: "Alpha")
+        let out = try YAMLSerializer.encode([match])
+
+        for key in ["label", "left_word", "right_word", "uppercase_style",
+                    "force_mode", "search_terms", "comment"] {
+            XCTAssertFalse(out.contains(key), "\(key) must not be emitted when unset: \(out)")
+        }
+        XCTAssertFalse(out.contains("null"), "unset keys must be omitted, not nulled: \(out)")
+    }
+
+    func testUnrecognisedEnumValueRoundTripsInsteadOfFailing() throws {
+        // uppercase_style and force_mode are String, not Swift enums, on purpose: a
+        // strict enum would throw here, and a file that fails to decode is stored
+        // with a parseError and becomes unwritable.
+        let yaml = """
+        matches:
+          - trigger: "::x"
+            replace: Alpha
+            force_mode: some_future_mode
+            uppercase_style: some_future_style
+        """
+        let match = try XCTUnwrap(try YAMLSerializer.decode(yaml: yaml).first)
+        XCTAssertEqual(match.forceMode, "some_future_mode")
+        XCTAssertEqual(match.uppercaseStyle, "some_future_style")
+
+        let out = try YAMLSerializer.encode([match])
+        XCTAssertTrue(out.contains("some_future_mode"), "unknown values must survive: \(out)")
+        XCTAssertTrue(out.contains("some_future_style"), "unknown values must survive: \(out)")
     }
 }

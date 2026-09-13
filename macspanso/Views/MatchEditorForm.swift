@@ -19,6 +19,10 @@ struct MatchEditorForm: View {
     @State private var savedTriggers: [String]? = nil
     @State private var destinationURL: URL? = nil
     @State private var regexTestInput: String = ""
+    /// Held as raw text rather than derived from `draft.searchTerms`: a binding that
+    /// re-rendered the parsed array would swallow the comma as the user typed it,
+    /// making a second term impossible to enter.
+    @State private var searchTermsText: String
 
     init(
         match: EspansoMatch,
@@ -36,6 +40,8 @@ struct MatchEditorForm: View {
         _useRegex = State(initialValue: match.regex != nil)
         _isFormMatch = State(initialValue: match.form != nil)
         _triggerEntryIDs = State(initialValue: (match.triggers ?? []).map { _ in UUID() })
+        _searchTermsText = State(
+            initialValue: (match.searchTerms ?? []).joined(separator: ", "))
     }
 
     private var isNew: Bool { sourceFile == nil }
@@ -123,10 +129,7 @@ struct MatchEditorForm: View {
     private var destinationSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Save to", systemImage: "folder")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+                .sectionHeader()
 
             HStack(spacing: 8) {
                 Picker("", selection: destinationBinding) {
@@ -195,10 +198,7 @@ struct MatchEditorForm: View {
     private var triggerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Trigger", systemImage: "keyboard")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+                .sectionHeader()
 
             HStack(spacing: 8) {
                 TextField(useRegex ? "Regex pattern…" : "e.g. ::hello", text: triggerBinding)
@@ -349,10 +349,7 @@ struct MatchEditorForm: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Replacement", systemImage: "text.alignleft")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
+                    .sectionHeader()
                 Spacer()
                 Picker("", selection: $isFormMatch) {
                     Text("Text").tag(false)
@@ -411,10 +408,7 @@ struct MatchEditorForm: View {
                 Image(systemName: "eye")
                 Text("Preview")
             }
-            .font(.caption)
-            .fontWeight(.semibold)
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
+            .sectionHeader()
 
             Text(preview.isEmpty ? "—" : preview)
                 .font(.system(.body, design: .monospaced))
@@ -444,10 +438,12 @@ struct MatchEditorForm: View {
     private var optionsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Options")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+                .sectionHeader()
+
+            // The match list and Quick Switcher both search `label`, so until now
+            // they filtered on a field that couldn't be set anywhere in the app.
+            TextField("Label (optional)", text: optionalStringBinding(\.label))
+                .textFieldStyle(.roundedBorder)
 
             Toggle("Word boundary", isOn: Binding(
                 get: { draft.word ?? false },
@@ -457,8 +453,89 @@ struct MatchEditorForm: View {
                 get: { draft.propagateCase ?? false },
                 set: { draft.propagateCase = $0 ? true : nil }
             ))
+
+            advancedSection
         }
     }
+
+    /// espanso keys that matter but shouldn't lengthen the default form. Every
+    /// control writes `nil` rather than a falsy value, so an option the user never
+    /// touches leaves no key in the YAML at all.
+    private var advancedSection: some View {
+        DisclosureGroup("Advanced") {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Match only at start of word", isOn: Binding(
+                    get: { draft.leftWord ?? false },
+                    set: { draft.leftWord = $0 ? true : nil }
+                ))
+                Toggle("Match only at end of word", isOn: Binding(
+                    get: { draft.rightWord ?? false },
+                    set: { draft.rightWord = $0 ? true : nil }
+                ))
+
+                Picker("Capitalisation", selection: optionalChoiceBinding(\.uppercaseStyle)) {
+                    Text("Default").tag("")
+                    Text("Capitalize").tag("capitalize")
+                    Text("Capitalize Words").tag("capitalize_words")
+                    Text("UPPERCASE").tag("uppercase")
+                }
+                .help("Used with Propagate case to decide how a capitalised trigger is echoed.")
+
+                Picker("Injection", selection: optionalChoiceBinding(\.forceMode)) {
+                    Text("Default").tag("")
+                    Text("Clipboard").tag("clipboard")
+                    Text("Keystrokes").tag("keys")
+                }
+                .help("Clipboard pastes the replacement in one go — the fix for long or multi-line text in slow apps.")
+
+                VStack(alignment: .leading, spacing: 2) {
+                    TextField("Search terms (comma separated)", text: $searchTermsText)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: searchTermsText) { text in
+                            let terms = text.split(separator: ",")
+                                .map { $0.trimmingCharacters(in: .whitespaces) }
+                                .filter { !$0.isEmpty }
+                            draft.searchTerms = terms.isEmpty ? nil : terms
+                        }
+                    Text("Extra words that find this match in espanso's own search bar.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                TextField("Comment (optional)", text: optionalStringBinding(\.comment))
+                    .textFieldStyle(.roundedBorder)
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    // MARK: - Optional-field bindings
+    //
+    // espanso omits what it doesn't need, and so must we: writing `false` or `""`
+    // would add a key the user never asked for and churn the file on every save.
+
+    private func optionalStringBinding(
+        _ key: WritableKeyPath<EspansoMatch, String?>
+    ) -> Binding<String> {
+        Binding(
+            get: { draft[keyPath: key] ?? "" },
+            set: {
+                let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                draft[keyPath: key] = trimmed.isEmpty ? nil : $0
+            }
+        )
+    }
+
+    /// Pickers can't select nil, so "Default" is the empty tag and maps back to nil.
+    private func optionalChoiceBinding(
+        _ key: WritableKeyPath<EspansoMatch, String?>
+    ) -> Binding<String> {
+        Binding(
+            get: { draft[keyPath: key] ?? "" },
+            set: { draft[keyPath: key] = $0.isEmpty ? nil : $0 }
+        )
+    }
+
 
     // MARK: - Helpers
 
@@ -540,4 +617,21 @@ struct MatchEditorForm: View {
             saveError = error.localizedDescription
         }
     }
+}
+
+
+// MARK: - Section header styling
+
+private struct SectionHeaderStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+    }
+}
+
+private extension View {
+    func sectionHeader() -> some View { modifier(SectionHeaderStyle()) }
 }

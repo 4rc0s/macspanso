@@ -18,9 +18,21 @@ public struct EspansoMatch: Identifiable, Codable, Equatable {
     public var label: String?
     public var propagateCase: Bool?
     public var word: Bool?
+    public var leftWord: Bool?
+    public var rightWord: Bool?
+    /// espanso allows "capitalize", "capitalize_words", "uppercase". Kept as a
+    /// String, not an enum: an unrecognised value must round-trip, and a strict
+    /// enum would fail the decode and mark the whole file unparseable.
+    public var uppercaseStyle: String?
+    /// espanso allows "clipboard" or "keys". String for the same reason.
+    public var forceMode: String?
+    public var searchTerms: [String]?
+    public var comment: String?
 
-    /// YAML keys on this match that macspanso doesn't model (markdown, priority,
-    /// paste_shortcut, …), preserved verbatim so editing never destroys them.
+    /// YAML keys on this match that macspanso doesn't model (markdown, html,
+    /// image_path, paragraph, …), preserved verbatim so editing never destroys them.
+    /// The authoritative key list is espanso's own schemas/match.schema.json, which
+    /// sets additionalProperties: false — check it before assuming a key exists.
     public var extras: [String: YAMLAny] = [:]
 
     public init(
@@ -34,7 +46,13 @@ public struct EspansoMatch: Identifiable, Codable, Equatable {
         vars: [EspansoVar]? = nil,
         label: String? = nil,
         propagateCase: Bool? = nil,
-        word: Bool? = nil
+        word: Bool? = nil,
+        leftWord: Bool? = nil,
+        rightWord: Bool? = nil,
+        uppercaseStyle: String? = nil,
+        forceMode: String? = nil,
+        searchTerms: [String]? = nil,
+        comment: String? = nil
     ) {
         self.id = id
         self.trigger = trigger
@@ -47,13 +65,24 @@ public struct EspansoMatch: Identifiable, Codable, Equatable {
         self.label = label
         self.propagateCase = propagateCase
         self.word = word
+        self.leftWord = leftWord
+        self.rightWord = rightWord
+        self.uppercaseStyle = uppercaseStyle
+        self.forceMode = forceMode
+        self.searchTerms = searchTerms
+        self.comment = comment
     }
 
     // id is internal — exclude from YAML encode/decode
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case trigger, triggers, regex, replace, form, vars, label, word
-        case formFields    = "form_fields"
-        case propagateCase = "propagate_case"
+        case trigger, triggers, regex, replace, form, vars, label, word, comment
+        case formFields     = "form_fields"
+        case propagateCase  = "propagate_case"
+        case leftWord       = "left_word"
+        case rightWord      = "right_word"
+        case uppercaseStyle = "uppercase_style"
+        case forceMode      = "force_mode"
+        case searchTerms    = "search_terms"
     }
 
     /// YAML key names this model handles explicitly; anything else is an extra.
@@ -73,6 +102,12 @@ public struct EspansoMatch: Identifiable, Codable, Equatable {
         self.label         = try c.decodeIfPresent(String.self,              forKey: .label)
         self.propagateCase = try c.decodeIfPresent(Bool.self,                forKey: .propagateCase)
         self.word          = try c.decodeIfPresent(Bool.self,                forKey: .word)
+        self.leftWord      = try c.decodeIfPresent(Bool.self,                forKey: .leftWord)
+        self.rightWord     = try c.decodeIfPresent(Bool.self,                forKey: .rightWord)
+        self.uppercaseStyle = try c.decodeIfPresent(String.self,             forKey: .uppercaseStyle)
+        self.forceMode     = try c.decodeIfPresent(String.self,              forKey: .forceMode)
+        self.searchTerms   = try c.decodeIfPresent([String].self,            forKey: .searchTerms)
+        self.comment       = try c.decodeIfPresent(String.self,              forKey: .comment)
         // `form:` takes precedence — clear `replace:` if both are present in malformed YAML.
         if self.form != nil { self.replace = nil }
 
@@ -97,6 +132,12 @@ public struct EspansoMatch: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(label,         forKey: .label)
         try c.encodeIfPresent(propagateCase, forKey: .propagateCase)
         try c.encodeIfPresent(word,          forKey: .word)
+        try c.encodeIfPresent(leftWord,      forKey: .leftWord)
+        try c.encodeIfPresent(rightWord,     forKey: .rightWord)
+        try c.encodeIfPresent(uppercaseStyle, forKey: .uppercaseStyle)
+        try c.encodeIfPresent(forceMode,     forKey: .forceMode)
+        try c.encodeIfPresent(searchTerms,   forKey: .searchTerms)
+        try c.encodeIfPresent(comment,       forKey: .comment)
 
         var dynamic = encoder.container(keyedBy: AnyCodingKey.self)
         for key in extras.keys.sorted() {
