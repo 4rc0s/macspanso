@@ -27,7 +27,7 @@ xcodebuild test -scheme macspanso -destination 'platform=macOS' \
 
 There is no linter and no formatter. CI (`.github/workflows/ci.yml`) runs the build, uploads the app bundle as an artifact, then runs tests with a 60s per-test allowance so a hung test fails rather than stalling the runner. `release.yml` fires only on `v*` tags and needs signing secrets.
 
-Version lives in `project.yml` (`CFBundleShortVersionString` / `CFBundleVersion`) and is mirrored into the tracked-but-generated `macspanso/App/Info.plist`; keep both in step. `Casks/macspanso.rb` and `docs/index.html` describe the *published* release and are bumped at tag time, not alongside a feature.
+Version lives in `project.yml` (`CFBundleShortVersionString` / `CFBundleVersion`) and is mirrored into the tracked-but-generated `macspanso/App/Info.plist`; keep both in step. Nothing else in the repo carries a version worth touching — see "Upstream-owned files" below.
 
 ## Architecture
 
@@ -93,4 +93,13 @@ XCTest, `@testable import macspanso`. Classes that touch the actor-isolated type
 ## Notes
 
 - `CHANGELOG.md` entries are user-facing prose: bolded symptom, em dash, then what went wrong and what changed. Match that register rather than listing commits.
-- This is a fork; upstream is `jeffcaldwellca/macspanso`. Release DMGs come from upstream — this fork's CI produces ad-hoc-signed artifacts only.
+- This is a fork (`4rc0s/macspanso`); upstream is `jeffcaldwellca/macspanso`. Release DMGs come from upstream — this fork's CI produces ad-hoc-signed artifacts only.
+
+## Upstream-owned files — do not bump
+
+`docs/` and `Casks/macspanso.rb` describe upstream's published release, not this fork's build. **Leave both alone**, including when bumping the version:
+
+- `docs/` is upstream's marketing site vendored into the repo. Every URL in it points at `www.jeffcaldwell.ca/macspanso/` (`robots.txt`, `sitemap.xml`, and the canonical/OG tags in `index.html`), and there is no `CNAME` here, so this fork does not publish it. The version strings in `index.html` (the `softwareVersion` JSON-LD and the footer) are upstream's to update.
+- `Casks/macspanso.rb` is a template. `release.yml` rewrites the cask in the *tap* repo (`jeffcaldwellca/homebrew-tap`, checked out to `tap/`), never this copy — so the in-repo version and its `PLACEHOLDER_UPDATED_BY_RELEASE_WORKFLOW` sha are inert by design.
+
+`release.yml` cannot run here regardless: it needs `TAP_TOKEN` (a PAT scoped to upstream's tap) and Developer ID signing secrets, neither of which this fork has. There is no "tag time" for this fork. If work goes upstream as a PR, leaving these untouched is also the right hygiene — they are the maintainer's release surface.
