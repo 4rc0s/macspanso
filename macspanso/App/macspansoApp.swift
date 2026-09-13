@@ -6,7 +6,9 @@ struct macspansoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // No windows — menu bar only. LSUIElement suppresses the Dock icon.
-        Settings { EmptyView() }
+        // No main window — menu bar only; LSUIElement suppresses the Dock icon.
+        // The Settings scene is real: it backs ⌘, and the status menu's
+        // "Settings…" item (opened via showSettingsWindow:).
+        Settings { SettingsView() }
     }
 }

@@ -1,7 +1,6 @@
 // macspanso/MenuBar/MenuBarController.swift
 import AppKit
 import Combine
-import ServiceManagement
 import KeyboardShortcuts
 
 @MainActor
@@ -15,6 +14,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let backupManager: BackupManager
     private let updateChecker: UpdateChecker
     private var didCreateSessionSnapshot = false
+    private let loginItem = LoginItem()
 
     private static let espansoURL = URL(string: "https://espanso.org")!
     private static let releasesURL = URL(string: "https://github.com/jeffcaldwellca/macspanso/releases/latest")!
@@ -179,8 +179,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let launchAtLoginItem = NSMenuItem(title: "Launch at Login",
                                            action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginItem.target = self
-        launchAtLoginItem.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
+        loginItem.refresh()
+        launchAtLoginItem.state = loginItem.isEnabled ? .on : .off
         menu.addItem(launchAtLoginItem)
+
+        let settingsItem = NSMenuItem(title: "Settings…",
+                                      action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
 
         menu.addItem(.separator())
         let aboutItem = NSMenuItem(title: "About macspanso",
@@ -432,15 +438,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleLaunchAtLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            NSLog("Launch at login toggle failed: %@", error.localizedDescription)
-        }
+        loginItem.toggle()
         buildMenu()
+    }
+
+    /// Opens the Settings scene's window (see SettingsView). Activate first:
+    /// for an accessory app the window can otherwise open behind the
+    /// frontmost app. The window doesn't flip the activation policy the way
+    /// the Match Manager does — it's a utility, not a place the user lives.
+    @objc private func openSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }
