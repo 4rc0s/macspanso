@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Matches are grouped by file** — the match list now shows your matches under the file each one lives in, which is espanso's own unit of organisation rather than a category invented by this app: the same grouping is what you see editing the files by hand. Group labels drop the `.yml`, since the extension is espanso's loading rule and not a name you chose, and two groups that would read the same fall back to their folder path. Subfolders collapse into one level you can fold away. The toolbar button on the right switches back to the flat list at any time.
+- **Groups can be renamed, deleted, and rearranged** — **Rename…** and **Delete Group…** live in a group's context menu. Deleting offers to move the matches into another group first, so nothing is thrown away by accident; a group whose file couldn't be read can only be deleted outright, because there is nothing legible to move. Renaming is a file rename and never rewrites the YAML, so comments and formatting are untouched and an open editor keeps its place. Matches move between groups by dragging them onto a group label, from **Move to** in their context menu, or from the **Group** picker in the editor, which now works on an existing match and not only a new one.
+
+### Fixed
+- **A new group saved outside the espanso folder silently did nothing** — the **New Group…** panel opened on the match folder but let you navigate anywhere, and the app only checked the file name, not where it was going. Saving to the Desktop wrote the file, showed the match in the list, and then lost it on the next launch — espanso never loads anything outside its own match folder, so the snippet had never once expanded. Any destination outside the match folder is now refused with an explanation, whether it arrives from the save panel, a drag, or the **Move to** menu.
+- **Typos in a spaced variable reference went unreported** — `{{ name }}` with spaces inside the braces is interpolated by espanso, and the preview filled it in, but validation didn't recognise it as a variable reference at all: a misspelled name in that form raised no warning and saved cleanly. Validation now reads references exactly as espanso and the preview do.
+- **Deleting a group lost your place even when nothing was deleted** — choosing to move a group's matches into another group first still cleared the selection and closed the open editor, as though the matches had been thrown away rather than simply relocated.
+- **The "changed externally" banner could get stuck** — if the file it referred to was renamed or deleted before you answered it, **Reload** had nothing to read and quietly did nothing, leaving a dead button and a banner only **Keep Mine** would dismiss. The notice now follows a renamed file and clears when its file is gone.
+- **A group's match count ignored the search box** — while searching, the number beside a group counted every match in the file rather than the ones shown beneath it.
+- **The drop highlight could disappear mid-drag** — dragging a match from one group onto another sometimes cleared the highlight on the group being entered, so there was nothing showing where the match would land.
+- **A group renamed with the editor open could resurrect the old file** — if the **Group** picker had been touched before the rename, saving moved the match to the path the group used to have, recreating it under the old name.
+
 ## [1.7.0] - 2026-09-13
 
 ### Added

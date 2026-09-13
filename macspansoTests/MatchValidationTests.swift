@@ -105,6 +105,37 @@ extension MatchValidationTests {
             m, existingMatches: [], globalVarNames: ["city"])
         XCTAssertEqual(errors, [.unresolvedVarReference("nope")])
     }
+
+    // The validator's reference pattern must be espanso's own — the same one
+    // MatchExpander.preview substitutes with. A narrower one here means a
+    // spaced reference is interpolated by espanso and filled in by the preview
+    // but never checked, so the typo in it is reported nowhere.
+    // Paired with MatchExpanderTests.testWhitespaceInsideBracesStillInterpolates.
+
+    func testSpacedVarReferenceIsUnresolvedWhenUndeclared() {
+        let m = EspansoMatch(trigger: "::x", replace: "Hello {{ nope }}")
+        let errors = MatchValidator.validate(m, existingMatches: [])
+        XCTAssertEqual(errors, [.unresolvedVarReference("nope")],
+                       "espanso interpolates {{ nope }}, so validation must see it too")
+    }
+
+    func testSpacedVarReferenceResolvesAgainstADeclaredVar() {
+        let m = EspansoMatch(
+            trigger: "::date",
+            replace: "Today is {{ d }}",
+            vars: [EspansoVar(name: "d", type: .date)]
+        )
+        XCTAssertFalse(
+            MatchValidator.validate(m, existingMatches: [])
+                .contains(.unresolvedVarReference("d")))
+    }
+
+    func testSpacedGlobalVarReferenceResolves() {
+        let m = EspansoMatch(trigger: "::where", replace: "I live in {{ city }}")
+        let errors = MatchValidator.validate(
+            m, existingMatches: [], globalVarNames: ["city"])
+        XCTAssertTrue(errors.isEmpty, "global var reference flagged: \(errors)")
+    }
 }
 
 // MARK: - Var name validity (espanso can only reference \w+ names)

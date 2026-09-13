@@ -25,19 +25,24 @@ struct FileTreeView: View {
     }
 
     var body: some View {
+        // Hoisted once per render: conflictingFileURLs rebuilds the whole
+        // cross-file conflict map, so reading it inside fileLabel made that
+        // O(files × all matches) on every body evaluation — including every
+        // keystroke in the search field. MatchListView.flatList does the same.
+        let conflicted = conflictingFileURLs
         // Use List(selection:) so rows highlight correctly on macOS.
         // Package matches get no .tag, preventing them from being selected
         // (allMatches excludes package files, so the editor panel can't display them).
-        List(selection: $selectedMatchIDs) {
+        return List(selection: $selectedMatchIDs) {
             ForEach(visibleGroups) { group in
                 if let folderPath = group.folderPath {
-                    folderSection(group, folderPath: folderPath)
+                    folderSection(group, folderPath: folderPath, conflicted: conflicted)
                 } else {
                     ForEach(group.files, id: \.id) { file in
                         Section {
                             fileBodyRows(file)
                         } header: {
-                            fileLabel(file)
+                            fileLabel(file, conflicted: conflicted)
                         }
                     }
                 }
@@ -96,11 +101,15 @@ struct FileTreeView: View {
     // MARK: - Sections
 
     /// A subdirectory: one collapsible row, its files beneath it.
-    private func folderSection(_ group: EspansoConfigStore.FileGroup, folderPath: String) -> some View {
+    private func folderSection(
+        _ group: EspansoConfigStore.FileGroup,
+        folderPath: String,
+        conflicted: Set<URL>
+    ) -> some View {
         Section {
             DisclosureGroup(isExpanded: expansion(for: folderPath)) {
                 ForEach(group.files, id: \.id) { file in
-                    fileLabel(file)
+                    fileLabel(file, conflicted: conflicted)
                     fileBodyRows(file)
                 }
             } label: {
@@ -113,7 +122,7 @@ struct FileTreeView: View {
                         .fontWeight(.medium)
                         .lineLimit(1)
                     Spacer()
-                    Text("\(group.files.reduce(0) { $0 + $1.matches.count })")
+                    Text("\(group.files.reduce(0) { $0 + visibleMatches(in: $1).count })")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -166,7 +175,7 @@ struct FileTreeView: View {
     /// match row here moves it into this file. Folders are deliberately not
     /// drop targets — with several files inside, the destination would be
     /// ambiguous.
-    private func fileLabel(_ file: MatchFile) -> some View {
+    private func fileLabel(_ file: MatchFile, conflicted: Set<URL>) -> some View {
         HStack {
             if file.isPackage {
                 Image(systemName: "lock")
@@ -178,10 +187,12 @@ struct FileTreeView: View {
                 .fontWeight(.medium)
                 .lineLimit(1)
             Spacer()
-            Text("\(file.matches.count)")
+            // Counts the rows actually shown: while searching, the badge must
+            // agree with the matches beneath it rather than the file's total.
+            Text("\(visibleMatches(in: file).count)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            if conflictingFileURLs.contains(file.url) {
+            if conflicted.contains(file.url) {
                 Image(systemName: "exclamationmark.2")
                     .imageScale(.small)
                     .foregroundStyle(.orange)
@@ -209,7 +220,15 @@ struct FileTreeView: View {
             move(matchID: matchID, to: file.url)
             return true
         }, isTargeted: { targeted in
-            dropTargetURL = targeted && file.isDroppable ? file.url : nil
+            // Only clear the highlight if it is still ours: dragging from one
+            // label onto another fires false on the label being left and true
+            // on the one being entered in unspecified order, so an unguarded
+            // nil here can wipe the highlight the new target just set.
+            if targeted {
+                if file.isDroppable { dropTargetURL = file.url }
+            } else if dropTargetURL == file.url {
+                dropTargetURL = nil
+            }
         })
         .contextMenu {
             Button("Open in Editor") {
@@ -259,7 +278,12 @@ struct FileTreeView: View {
     private func deleteGroup(_ file: MatchFile, movingTo target: URL?) {
         do {
             try store.deleteFile(at: file.url, movingMatchesTo: target)
-            selectedMatchIDs.subtract(file.matches.map(\.id))
+            // Only an outright delete destroys the matches. Moving them keeps
+            // their UUIDs, so dropping the selection there would close an open
+            // editor on a match that merely changed file.
+            if target == nil {
+                selectedMatchIDs.subtract(file.matches.map(\.id))
+            }
             deleteTarget = nil
         } catch {
             deleteTarget = nil
@@ -355,9 +379,12 @@ private struct RenameGroupSheet: View {
     let onRename: () -> Void
     let onCancel: () -> Void
 
+    /// Mirrors `EspansoConfigStore.renameFile`'s own rule, so a name it would
+    /// refuse simply leaves Rename disabled instead of arriving as an alert.
     private var isValid: Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && !trimmed.contains("/")
+            && trimmed != "." && trimmed != ".."
     }
 
     var body: some View {

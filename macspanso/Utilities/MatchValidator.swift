@@ -99,9 +99,13 @@ public enum MatchValidator {
         return errors
     }
 
-    /// Extract {{varName}} references from a replacement string.
+    /// Extract {{varName}} references from a replacement string. The pattern must
+    /// be espanso's own — the same one `MatchExpander.preview` substitutes with,
+    /// including the optional whitespace inside the braces. A narrower pattern
+    /// here means `{{ name }}` is interpolated by espanso and by the preview but
+    /// never checked, so a typo in a spaced reference goes unreported.
     private static func varReferences(in text: String) -> [String] {
-        let pattern = #"\{\{(\w+)\}\}"#
+        let pattern = #"\{\{\s*(\w+)\s*\}\}"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let range = NSRange(text.startIndex..., in: text)
         return regex.matches(in: text, range: range).compactMap {
