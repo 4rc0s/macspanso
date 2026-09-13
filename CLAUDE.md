@@ -82,7 +82,9 @@ Note the asymmetry that hides this: `$HOME` is not symlinked, so production path
 
 Every `Process` in the codebase (`EspansoProcessManager.run`, `BackupManager`'s `zip`/`unzip`) follows the same shape, and the deviations have each caused a shipped hang: **drain the pipe to EOF before `waitUntilExit()`**, because output past the ~64 KB pipe buffer blocks the child forever; return early if `proc.run()` throws, since our end still holds the write side and the read would never see EOF; and send unread stdout to `FileHandle.nullDevice` rather than an undrained `Pipe()`. `resolveMatchDirectory` additionally races a 3s deadline and kills the child, so a wedged espanso binary can't block launch.
 
-`EspansoProcessManager` parses `espanso status` output as strings, verified against espanso v2.2.x — it's the fragile seam on espanso upgrades. Pass `espansoPath:` to the initializer in tests.
+`EspansoProcessManager` parses `espanso status` output as strings, verified against espanso v2.4.1 — it's the fragile seam on espanso upgrades. Pass `espansoPath:` to the initializer in tests.
+
+**`espanso status` reports daemon liveness only.** It is documented as "Check if the espanso daemon is running or not" and prints `espanso is running` whether or not expansion is enabled; no `espanso cmd` subcommand (`enable`/`disable`/`toggle`/`search`) queries that state. `DaemonState` therefore has no `disabled` case, and nothing may branch on one. Code that did shipped three bugs at once: the menu toggle could only ever disable, an expiring snooze never re-enabled, and the "Espanso Enabled" checkmark always read enabled. Turn expansion on or off with an explicit `setExpansions(enabled:)`; when you genuinely mean "flip it", delegate to espanso's own `cmd toggle` (`toggleExpansions()`) rather than reading a state that isn't there.
 
 ### Packages are read-only
 

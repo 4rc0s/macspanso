@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Expansions could be switched off but not back on** — the menu's **Espanso Enabled** item decided which way to flip by reading `espanso status`, but that command only reports whether the espanso daemon is running, never whether expansion is enabled. It therefore always took the "disable" branch: a second click disabled again, and there was no way back from the menu or from the Shortcuts action. The menu now offers explicit **Enable Expansions** and **Disable Expansions** commands, and the Shortcuts **Toggle Espanso** action asks espanso itself to flip the state.
+- **Snooze never ended** — when a snooze ran out, expansion was only switched back on if macspanso believed it was currently disabled, which it had no way to know. Espanso stayed disabled indefinitely while the menu showed it as enabled, and starting a snooze before the first status check silently didn't disable anything at all. Both ends of a snooze now act unconditionally.
+- **The menu said expansion was on when it was off** — the **Espanso Enabled** checkmark was driven by whether the daemon was alive, so it stayed ticked after expansion was turned off. The status line now reads **Espanso running**, which is what can actually be determined.
+
 ## [1.6.0] - 2026-09-13
 
 ### Added

@@ -4,9 +4,13 @@ import Combine
 
 @MainActor
 final class EspansoProcessManager: ObservableObject {
+    /// What `espanso status` can actually report. There is deliberately no
+    /// `disabled` case: `espanso status` is documented as "Check if the espanso
+    /// daemon is running or not" and prints "espanso is running" whether or not
+    /// expansion is enabled. No `espanso cmd` subcommand queries that state either,
+    /// so a `disabled` case could never be reached — see `setExpansions(enabled:)`.
     enum DaemonState: Equatable {
-        case running        // espanso is running and expansion is enabled
-        case disabled       // espanso is running but expansion is disabled
+        case running        // daemon is running; expansion may be enabled or not
         case stopped        // espanso daemon is not running
         case notInstalled   // espanso binary not found in PATH
         case unknown
@@ -54,7 +58,8 @@ final class EspansoProcessManager: ObservableObject {
     // MARK: - Commands
 
     /// Refreshes daemon state by running `espanso status` off the main thread.
-    // Verified against espanso v2.2.x output. Check if output strings change on upgrade.
+    // Verified against espanso v2.4.1 output ("espanso is running" / "espanso is
+    // not running"). Check if these strings change on upgrade.
     func refresh() async {
         // Timers don't fire during system sleep, so a snooze can outlive its end
         // date — the poll is the reliable place to notice and re-enable.
@@ -65,8 +70,6 @@ final class EspansoProcessManager: ObservableObject {
         let lower = output.lowercased()
         if lower.contains("not running") || lower.contains("stopped") {
             state = .stopped
-        } else if lower.contains("disabled") {
-            state = .disabled
         } else if lower.contains("running") {
             // "not running" checked above, so this is safe
             state = .running
@@ -75,15 +78,26 @@ final class EspansoProcessManager: ObservableObject {
         }
     }
 
-    /// Toggle text expansion on/off (daemon keeps running).
-    func toggleEnabled() {
+    /// Turn text expansion on or off (the daemon keeps running).
+    ///
+    /// This takes an explicit value rather than reading `state` and flipping it:
+    /// espanso never reports whether expansion is enabled, so a state-driven
+    /// toggle always took the same branch and could only ever disable.
+    func setExpansions(enabled: Bool) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            switch state {
-            case .running:  await run("cmd", "disable")
-            case .disabled: await run("cmd", "enable")
-            default:        break
-            }
+            await run("cmd", enabled ? "enable" : "disable")
+            await refresh()
+        }
+    }
+
+    /// Flip expansion without knowing its current state — espanso's own
+    /// `cmd toggle` does the flipping, which is the only correct way to express
+    /// "toggle" when the state can't be queried.
+    func toggleExpansions() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await run("cmd", "toggle")
             await refresh()
         }
     }
@@ -129,7 +143,10 @@ final class EspansoProcessManager: ObservableObject {
         scheduleSnoozeTimer()
         Task { @MainActor [weak self] in
             guard let self else { return }
-            if state == .running { await run("cmd", "disable") }
+            // Unconditional for the same reason as cancelSnooze: gating on `.running`
+            // meant a snooze started before the first poll (state `.unknown`) showed
+            // "Snoozed until…" while espanso kept expanding.
+            await run("cmd", "disable")
             await refresh()
         }
     }
@@ -142,7 +159,10 @@ final class EspansoProcessManager: ObservableObject {
         if reenable {
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if state == .disabled { await run("cmd", "enable") }
+                // Unconditional: espanso can't tell us whether expansion is off, and
+                // enabling an already-enabled espanso is a no-op. Guarding this on a
+                // state that is never reported is what made snooze one-way.
+                await run("cmd", "enable")
                 await refresh()
             }
         }
