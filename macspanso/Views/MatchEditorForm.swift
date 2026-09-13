@@ -20,8 +20,6 @@ struct MatchEditorForm: View {
     @State private var destinationURL: URL? = nil
     @State private var regexTestInput: String = ""
 
-    private static let lastDestinationKey = "macspanso.lastDestinationFilePath"
-
     init(
         match: EspansoMatch,
         sourceFile: MatchFile?,
@@ -167,8 +165,7 @@ struct MatchEditorForm: View {
 
     private func hydrateDestination() {
         guard destinationURL == nil else { return }
-        let defaults = UserDefaults.standard
-        if let path = defaults.string(forKey: Self.lastDestinationKey) {
+        if let path = Preferences.shared.lastDestinationFilePath {
             let candidate = URL(fileURLWithPath: path)
             if store.writableFiles.contains(where: { $0.url == candidate }) {
                 destinationURL = candidate
@@ -533,7 +530,7 @@ struct MatchEditorForm: View {
             if isNew {
                 let target = destinationURL ?? defaultDestination
                 try store.add(matchToSave, to: target)
-                UserDefaults.standard.set(target.path, forKey: Self.lastDestinationKey)
+                Preferences.shared.lastDestinationFilePath = target.path
             } else {
                 try store.update(matchToSave)
             }

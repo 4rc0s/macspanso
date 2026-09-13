@@ -45,7 +45,7 @@ struct MatchListView: View {
     @State private var deleteError: String?
     @State private var duplicateError: String?
     @State private var confirmMultiDelete = false
-    @AppStorage("macspanso.listSort") private var sortRaw: String = MatchListSort.fileOrder.rawValue
+    @AppStorage(Preferences.Key.listSort) private var sortRaw: String = MatchListSort.fileOrder.rawValue
     @State private var filter: MatchListFilter = .all
 
     private var singleSelectedMatchID: UUID? {

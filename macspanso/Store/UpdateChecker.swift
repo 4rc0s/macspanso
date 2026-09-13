@@ -20,7 +20,6 @@ final class UpdateChecker {
 
     // MARK: - Private
 
-    private static let lastCheckKey = "updateChecker.lastCheckDate"
     private static let checkInterval: TimeInterval = 86_400   // 24 hours
 
     private static let releasesURL = URL(
@@ -28,11 +27,13 @@ final class UpdateChecker {
     )!
 
     private let currentVersion: String
+    private let preferences: Preferences
     private var timer: Timer?
 
     // MARK: - Init
 
-    init() {
+    init(preferences: Preferences = .shared) {
+        self.preferences = preferences
         self.currentVersion =
             Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
@@ -51,19 +52,27 @@ final class UpdateChecker {
     /// Start automatic checking: fires immediately if stale, then every 24 h.
     /// Timers don't fire across system sleep, so callers should also invoke
     /// `checkIfStale()` at natural moments (e.g. when the menu opens).
+    ///
+    /// The timer always runs; each tick re-reads `automaticUpdateChecks`, so
+    /// the Settings toggle takes effect without restarting the checker.
     func startChecking() {
         checkIfStale()
         timer = Timer.scheduledTimer(
             withTimeInterval: Self.checkInterval,
             repeats: true
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in _ = await self?.fetchLatestRelease() }
+            Task { @MainActor [weak self] in
+                guard let self, self.preferences.automaticUpdateChecks else { return }
+                _ = await self.fetchLatestRelease()
+            }
         }
     }
 
-    /// Fetch only if the last successful check is older than the interval.
+    /// Fetch only if automatic checks are on and the last successful check is
+    /// older than the interval. The manual `checkNow` bypasses both.
     func checkIfStale() {
-        let lastCheck = UserDefaults.standard.object(forKey: Self.lastCheckKey) as? Date
+        guard preferences.automaticUpdateChecks else { return }
+        let lastCheck = preferences.lastUpdateCheck
         if lastCheck == nil || Date().timeIntervalSince(lastCheck!) >= Self.checkInterval {
             Task { _ = await fetchLatestRelease() }
         }
@@ -92,7 +101,7 @@ final class UpdateChecker {
             let http = response as? HTTPURLResponse, http.statusCode == 200
         else { return .failed }
 
-        UserDefaults.standard.set(Date(), forKey: Self.lastCheckKey)
+        preferences.lastUpdateCheck = Date()
 
         guard
             let json     = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

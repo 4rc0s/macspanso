@@ -16,6 +16,15 @@ final class EspansoProcessManagerTests: XCTestCase {
         return url.path
     }
 
+    /// A `Preferences` over a throwaway suite, so tests that snooze never
+    /// leave state in the developer's real defaults.
+    private func makeIsolatedPreferences() -> Preferences {
+        let suite = "macspanso.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return Preferences(defaults: defaults)
+    }
+
     /// Races `body` against a deadline. Async XCTest bodies that never return
     /// hang the whole suite (XCTest waits without timeout), so every test that
     /// exercises a potentially-hanging path must go through this.
@@ -76,7 +85,8 @@ extension EspansoProcessManagerTests {
 
     func testRefreshClearsExpiredSnooze() async throws {
         let path = try makeFakeEspanso(script: "echo 'espanso is running'")
-        let manager = EspansoProcessManager(espansoPath: path)
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences())
         defer { manager.cancelSnooze(reenable: false) }
 
         // Snooze that has already elapsed — as after a Mac sleeps through the

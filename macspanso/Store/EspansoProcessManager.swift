@@ -15,19 +15,21 @@ final class EspansoProcessManager: ObservableObject {
     @Published var state: DaemonState = .unknown
 
     /// Non-nil while a snooze is active; the user has temporarily disabled expansion
-    /// and we'll re-enable at this date. Persists across app launches via UserDefaults.
+    /// and we'll re-enable at this date. Persists across app launches via `Preferences`.
     @Published private(set) var snoozeUntil: Date?
 
     private var pollTimer: Timer?
     private var snoozeTimer: Timer?
     let espansoPath: String
+    private let preferences: Preferences
 
-    private static let snoozeDefaultsKey = "macspanso.snoozeUntil"
-
-    /// Pass a custom `espansoPath` for testing; leave nil to auto-locate via Homebrew / PATH.
-    init(espansoPath: String? = nil) {
+    /// Pass a custom `espansoPath` for testing; leave nil to auto-locate via
+    /// Homebrew / PATH. Pass `preferences` backed by a throwaway suite so tests
+    /// don't share persisted snooze state.
+    init(espansoPath: String? = nil, preferences: Preferences = .shared) {
         let path = espansoPath ?? EspansoProcessManager.locateEspanso() ?? ""
         self.espansoPath = path
+        self.preferences = preferences
         if path.isEmpty { state = .notInstalled }
         restorePersistedSnooze()
     }
@@ -121,7 +123,7 @@ final class EspansoProcessManager: ObservableObject {
 
     func snooze(until end: Date) {
         snoozeUntil = end
-        UserDefaults.standard.set(end, forKey: Self.snoozeDefaultsKey)
+        preferences.snoozeUntil = end
         scheduleSnoozeTimer()
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -132,7 +134,7 @@ final class EspansoProcessManager: ObservableObject {
 
     func cancelSnooze(reenable: Bool = true) {
         snoozeUntil = nil
-        UserDefaults.standard.removeObject(forKey: Self.snoozeDefaultsKey)
+        preferences.snoozeUntil = nil
         snoozeTimer?.invalidate()
         snoozeTimer = nil
         if reenable {
@@ -154,14 +156,13 @@ final class EspansoProcessManager: ObservableObject {
     }
 
     private func restorePersistedSnooze() {
-        guard let stored = UserDefaults.standard.object(forKey: Self.snoozeDefaultsKey) as? Date
-        else { return }
+        guard let stored = preferences.snoozeUntil else { return }
         if stored > Date() {
             snoozeUntil = stored
             scheduleSnoozeTimer()
         } else {
             // Snooze elapsed while the app was closed — clear silently.
-            UserDefaults.standard.removeObject(forKey: Self.snoozeDefaultsKey)
+            preferences.snoozeUntil = nil
         }
     }
 
