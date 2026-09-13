@@ -72,8 +72,67 @@ public enum YAMLSerializer {
     }
 
     /// Write full file content atomically, preserving top-level extras.
+    ///
+    /// The emitted YAML is decoded back and compared to what we meant to write
+    /// *before* anything touches disk. Yams emits from a node tree so malformed
+    /// syntax is near-impossible, but that is not the risk here: this app rewrites
+    /// whole files it doesn't own, so the failure that matters is emitting
+    /// something well-formed that no longer says what the model said. On a
+    /// mismatch nothing is written and the file keeps its previous contents,
+    /// which is the same guarantee the store's write-then-commit ordering relies on.
     public static func write(_ content: MatchFileContent, to url: URL) throws {
         let yaml = try encode(content)
+        try verifyRoundTrip(of: yaml, matches: content, for: url)
         try yaml.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Write verification
+
+    public enum SerializationError: LocalizedError {
+        /// The encoder produced YAML that doesn't read back as the same content.
+        case verificationFailed(file: String, reason: String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .verificationFailed(let file, let reason):
+                return "macspanso could not safely rewrite \(file): \(reason). "
+                     + "The file was left unchanged."
+            }
+        }
+    }
+
+    private static func verifyRoundTrip(
+        of yaml: String, matches content: MatchFileContent, for url: URL
+    ) throws {
+        let name = url.lastPathComponent
+        func fail(_ reason: String) -> SerializationError {
+            .verificationFailed(file: name, reason: reason)
+        }
+
+        let reread: MatchFileContent
+        do {
+            reread = try decodeContent(yaml: yaml)
+        } catch {
+            throw fail("the YAML it produced could not be parsed back")
+        }
+
+        guard reread.extras == content.extras else {
+            throw fail("top-level keys outside `matches:` did not survive the rewrite")
+        }
+
+        let intended = content.matches ?? []
+        let actual = reread.matches ?? []
+        guard intended.count == actual.count else {
+            throw fail("it would have written \(actual.count) matches instead of \(intended.count)")
+        }
+
+        for (expected, var got) in zip(intended, actual) {
+            // `id` is minted fresh at decode and deliberately never serialized,
+            // so align it and let Equatable compare everything else.
+            got.id = expected.id
+            guard got == expected else {
+                throw fail("the match `\(expected.primaryTrigger)` did not survive the rewrite")
+            }
+        }
     }
 }

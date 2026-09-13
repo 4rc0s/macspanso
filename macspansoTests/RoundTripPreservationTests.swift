@@ -288,3 +288,74 @@ extension RoundTripPreservationTests {
         XCTAssertTrue(out.contains("some_future_style"), "unknown values must survive: \(out)")
     }
 }
+
+// MARK: - Write verification
+//
+// `YAMLSerializer.write` decodes its own output and compares before touching disk.
+// The risk of that check is false positives: YAML scalars are ambiguous, and if a
+// preserved `extras` value decodes to a different type than it encoded from, a
+// perfectly good save would start failing. These pin the awkward cases.
+
+extension RoundTripPreservationTests {
+
+    private func tempDir(_ tag: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macspanso-\(tag)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
+    }
+
+    func testVerificationAcceptsAmbiguousScalars() throws {
+        // Every one of these is a scalar YAML could plausibly re-type on the way
+        // back in: quoted digits, YAML 1.1 booleans, floats that could shed their
+        // fraction, leading zeros, nulls, and an empty string.
+        let yaml = """
+        weird_top_level:
+          quoted_number: '123'
+          leading_zero: '007'
+          yes_string: 'yes'
+          bare_yes: yes
+          float_whole: 1.0
+          float_trailing: 1.50
+          big_int: 9007199254740993
+          explicit_null: ~
+          empty_string: ''
+          version_like: '1.2.3'
+        matches:
+          - trigger: "::x"
+            replace: "Alpha"
+            some_unmodelled_key:
+              nested: ['a', 1, true, 2.0, '3']
+        """
+        let content = try YAMLSerializer.decodeContent(yaml: yaml)
+        let url = try tempDir("verify-ok").appendingPathComponent("base.yml")
+
+        // The assertion is simply that this does not throw.
+        try YAMLSerializer.write(content, to: url)
+
+        let onDisk = try YAMLSerializer.decodeContent(contentsOf: url)
+        XCTAssertEqual(onDisk.extras, content.extras)
+        XCTAssertEqual(onDisk.matches?.count, 1)
+    }
+
+    func testVerificationRefusesToWriteAndLeavesFileIntact() throws {
+        // A model that cannot round-trip: `init(from:)` clears `replace` whenever
+        // `form` is present, so encoding both and reading back loses one of them.
+        let url = try tempDir("verify-fail").appendingPathComponent("base.yml")
+        let original = "matches:\n- trigger: \"::keep\"\n  replace: Untouched\n"
+        try original.write(to: url, atomically: true, encoding: .utf8)
+
+        var broken = EspansoMatch(trigger: "::bad", replace: "Replacement")
+        broken.form = "Form [[field]]"
+
+        XCTAssertThrowsError(try YAMLSerializer.write([broken], to: url)) { error in
+            guard case YAMLSerializer.SerializationError.verificationFailed = error else {
+                return XCTFail("expected verificationFailed, got \(error)")
+            }
+        }
+
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), original,
+            "a refused write must leave the previous contents exactly as they were")
+    }
+}

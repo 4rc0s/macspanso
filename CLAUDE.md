@@ -54,6 +54,8 @@ A corollary: never write into a file whose `parseError != nil`. A file that fail
 
 ### Write-then-commit ordering
 
+`YAMLSerializer.write` decodes its own output and compares it to the model before anything reaches disk — on a mismatch it throws and the file keeps its previous contents. Yams emits from a node tree, so malformed *syntax* is near-impossible and is not what this guards; the risk in an app that rewrites whole files it doesn't own is emitting something well-formed that no longer says what the model said. `id` is aligned before the comparison because it is minted at decode and never serialized. The check is cheap (files are small) and has no false positives on ambiguous YAML scalars — quoted digits, `yes`, whole floats, big ints, nulls, empty strings are all pinned by `testVerificationAcceptsAmbiguousScalars`. Nothing else in the app validates YAML: there is no linter, and `MatchValidator` checks app-level rules (triggers, variable references), not espanso's schema.
+
 Every mutating path on the store writes to disk **first** and only updates `matchFiles` if the write succeeded. This is deliberate — a failed write that had already mutated memory would leave the UI showing matches that don't exist on disk. Preserve this ordering in new write paths. `EspansoConfigStoreTests` makes the temp directory read-only (`0o555`) to force write failures, which works because writes are atomic (temp file + rename in the same directory).
 
 ### Watcher suppression
