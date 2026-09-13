@@ -93,8 +93,8 @@ macspanso lives in your menu bar. Click the icon to:
 
 | Action | How |
 |--------|-----|
-| Open match manager | Press **⌃⇧M** from any app, or click **Open Match Manager…** |
-| Create a match | Press **⌃⇧N** from any app, or press **+** in the match list |
+| Open match manager | Press **⌃⇧M** from any app (change it in Settings › Shortcuts), or click **Open Match Manager…** |
+| Create a match | Press **⌃⇧N** from any app (also customisable), or press **+** in the match list |
 | Edit a match | Select it in the list — the editor opens on the right |
 | Delete a match | Select it and press **−** in the toolbar |
 | Enable / disable espanso | Toggle **Espanso Enabled** in the menu |

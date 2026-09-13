@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.0] - 2026-09-13
+
+### Added
+- **Settings window** — press **⌘,** or choose **Settings…** from the menu for a proper settings window with General and Shortcuts tabs. Launch at Login lives there as well as in the menu, and it now tells you when macOS is still waiting for you to approve it in System Settings › Login Items.
+- **Customisable hotkeys** — ⌃⇧M and ⌃⇧N are now defaults rather than fixed. Record any combination in Settings › Shortcuts, or clear one to turn it off; the menu shows whatever you chose.
+- **Automatic update checks can be turned off** — the once-a-day check against GitHub is now a toggle in Settings › General. **Check for Updates…** in the menu always works regardless.
+
+### Fixed
+- **⌘, opened a blank window** — pressing ⌘, while the Match Manager was open showed an empty settings window. It now opens the real one.
+
 ## [1.5.0] - 2026-09-13
 
 ### Added

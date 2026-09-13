@@ -25,7 +25,9 @@ xcodebuild test -scheme macspanso -destination 'platform=macOS' \
   -only-testing:macspansoTests/EspansoConfigStoreTests/testAddRefusesParseErroredFile
 ```
 
-There is no linter and no formatter. CI (`.github/workflows/ci.yml`) runs the build, uploads the app bundle as an artifact, then runs tests with a 60s per-test allowance so a hung test fails rather than stalling the runner. `release.yml` fires only on `v*` tags and needs signing secrets.
+Pass `-derivedDataPath build/DerivedData` (gitignored) so builds don't land in `~/Library`. Local development is on Xcode 26.x; CI (`.github/workflows/ci.yml`) is pinned to Xcode 26.3 via `DEVELOPER_DIR` because `KeyboardShortcuts` declares swift-tools-version 6.2 and the runner's default 16.4 (Swift 6.1) cannot resolve it. Keep the two on the same major.
+
+There is no linter and no formatter. CI runs the build, uploads the app bundle as an artifact, then runs tests with a 60s per-test allowance so a hung test fails rather than stalling the runner. `release.yml` fires only on `v*` tags and needs signing secrets.
 
 Version lives in `project.yml` (`CFBundleShortVersionString` / `CFBundleVersion`) and is mirrored into the tracked-but-generated `macspanso/App/Info.plist`; keep both in step. Nothing else in the repo carries a version worth touching — see "Upstream-owned files" below.
 
@@ -90,15 +92,26 @@ Anything under `<matchdir>/packages/` is espanso-managed: excluded from writes, 
 
 Both are zips of the match directory. Backups are user-initiated to a chosen path (`.macspanso` extension); snapshots are automatic — one per editing session, taken the first time the Match Manager opens with a non-empty store, rotating at 10, in Application Support. Replace-mode restore calls `deleteUserMatchFiles`, which must cover both `.yml` and `.yaml` (espanso loads both — see `matchExtensions`).
 
+### Preferences, launch at login, hotkeys
+
+`Preferences` (`Store/Preferences.swift`) is the only place that touches `UserDefaults`. Its key strings predate it and are pinned by `PreferencesTests.testKeysAreFrozen` — renaming one orphans every user's stored value. It takes an injectable `UserDefaults`; tests use a throwaway suite so they never share `.standard`. Consumers (`EspansoProcessManager`, `UpdateChecker`) accept an optional `Preferences` and fall back to `.shared` *inside* the init body: a `= .shared` default argument is evaluated outside the main actor and the toolchain flags it.
+
+Two things are deliberately not in `Preferences`:
+
+- **Launch at Login** is never persisted. `LoginItem` (`App/LoginItem.swift`) reads `SMAppService.mainApp.status` live every time it is shown, because the user can flip it in System Settings › Login Items at any moment. It also surfaces `.requiresApproval`, which reads as "off" without that hint.
+- **Global hotkeys** are owned by the `KeyboardShortcuts` package. Names and initial combos live in `App/Shortcuts.swift`; storage is the package's own defaults keys. The status-menu items get their key equivalents from `setShortcut(for:)` rather than a hardcoded copy, and the global registrations are disabled while the menu is open (`menuWillOpen`/`menuDidClose`) so a combo doesn't fire twice. Anything that shows a combo to the user must read `KeyboardShortcuts.getShortcut(for:)` — it can be changed or cleared.
+
 ### Menu-bar and window presence
 
 `MenuBarController` flips `NSApp.setActivationPolicy` to `.regular` while the Match Manager window is open (so it appears in Cmd-Tab and the Dock) and back to `.accessory` on `willCloseNotification`. Activation deliberately uses the deprecated `NSApp.activate(ignoringOtherApps: true)`: for an accessory app the macOS 14 no-arg variant can silently no-op. `MatchManagerWindowController.placement(forFrame:visibleFrames:)` is pure and unit-tested — it requires half the window's area on one screen rather than a bare `intersects`, because a 1px sliver after a display change reads as "visible" and the window appears not to open.
 
 Focus commands (new match, about) reach SwiftUI through `NotificationCenter` posted one run-loop cycle late, so the view's `.onReceive` is wired up before the notification fires.
 
+The Settings window is the SwiftUI `Settings` scene (`SettingsView`), not a second window controller: that gives ⌘,, toolbar tabs, and frame autosave for free and guarantees one instance. The status menu opens it with `NSApp.activate(ignoringOtherApps: true)` followed by `sendAction(Selector(("showSettingsWindow:")))` — activation first, or an accessory app's window can open behind the frontmost app. It deliberately does not flip the activation policy; only the Match Manager does that. Because a `Settings` scene cannot be handed dependencies, `SettingsView` reaches state through `Preferences.shared`, `LoginItem`, and the package — keep it that way rather than threading the store in.
+
 ## Testing conventions
 
-XCTest, `@testable import macspanso`. Classes that touch the actor-isolated types are `@MainActor` (`EspansoConfigStoreTests`, `BackupManagerTests`, `EspansoProcessManagerTests`, `TriggerConflictTests`, `RoundTripPreservationTests`); the pure-logic ones are not (`MatchValidationTests`, `MatchExpanderTests`, `YAMLParsingTests`, `YAMLSerializationTests`, `TriggerModeTransitionTests`, `MatchManagerWindowPlacementTests`, `IDReassociationTests`). Tests build a real temp directory per test in `setUp` and write real YAML — there are no mocks or protocol seams. Most non-UI logic is reachable because the pure parts (`MatchValidator`, `MatchExpander`, `TriggerModeTransition`, `YAMLSerializer`, window placement, ID reassociation) are `static`/`nonisolated` and free of app state.
+XCTest, `@testable import macspanso`. Classes that touch the actor-isolated types are `@MainActor` (`EspansoConfigStoreTests`, `BackupManagerTests`, `EspansoProcessManagerTests`, `PreferencesTests`, `TriggerConflictTests`, `RoundTripPreservationTests`); the pure-logic ones are not (`MatchValidationTests`, `MatchExpanderTests`, `YAMLParsingTests`, `YAMLSerializationTests`, `TriggerModeTransitionTests`, `MatchManagerWindowPlacementTests`, `IDReassociationTests`). Tests build a real temp directory per test in `setUp` and write real YAML — there are no mocks or protocol seams. Most non-UI logic is reachable because the pure parts (`MatchValidator`, `MatchExpander`, `TriggerModeTransition`, `YAMLSerializer`, window placement, ID reassociation) are `static`/`nonisolated` and free of app state.
 
 ## Notes
 
