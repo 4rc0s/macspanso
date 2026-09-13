@@ -60,7 +60,17 @@ Atomic writes replace the inode, so the watcher's event handler cancels and re-o
 
 ### URL identity
 
-The store compares URLs by equality everywhere, but directory enumeration returns symlink-resolved paths (`/private/var/…`) while `appendingPathComponent` does not (`/var/…`). Both `init` and `scanMatchDirectory` call `resolvingSymlinksInPath()` to normalize at the boundary. Any new code constructing a URL to compare against store state must do the same.
+The store compares URLs by equality everywhere, but the same file arrives in two spellings: directory enumeration yields `/private/var/…`, while `appendingPathComponent` keeps `/var/…`.
+
+**`resolvingSymlinksInPath()` does not do what its name suggests.** It canonicalizes *toward* `/var/…` — it strips a `/private` prefix rather than adding one. The consequence that matters:
+
+> Normalize **both** operands of any path comparison, or neither. Normalizing one side is worse than normalizing neither, because it guarantees the mismatch it was meant to fix.
+
+`EspansoConfigStore` gets this right in two places that must stay in sync: `init` normalizes the root, and `scanMatchDirectory` maps the normalization over *every enumerated entry*. Code that enumerates and then compares against a path built from the root needs both halves.
+
+This has bitten twice. `BackupManager.deleteUserMatchFiles` built its `packages/` prefix from the root but compared it against raw enumerated entries, so `hasPrefix` was false for every entry, the guard never fired, and replace-mode restore deleted package files. The first attempted fix normalized only the root — a no-op that looked right.
+
+Note the asymmetry that hides this: `$HOME` is not symlinked, so production paths usually agree by accident, while `FileManager.temporaryDirectory` is always `/var/folders/…` → `/private/var/folders/…`. A path-comparison test failing here is a real bug, not a temp-directory artifact — and passing in production is not evidence the code is right.
 
 ### Match identity across reloads
 
