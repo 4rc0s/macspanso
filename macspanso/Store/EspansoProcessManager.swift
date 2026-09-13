@@ -9,6 +9,7 @@ final class EspansoProcessManager: ObservableObject {
     /// daemon is running or not" and prints "espanso is running" whether or not
     /// expansion is enabled. No `espanso cmd` subcommand queries that state either,
     /// so a `disabled` case could never be reached — see `setExpansions(enabled:)`.
+    /// The paused state is tracked separately, display-only, in `expansionsPaused`.
     enum DaemonState: Equatable {
         case running        // daemon is running; expansion may be enabled or not
         case stopped        // espanso daemon is not running
@@ -17,6 +18,13 @@ final class EspansoProcessManager: ObservableObject {
     }
 
     @Published var state: DaemonState = .unknown
+
+    /// Whether espanso's expansion engine is paused (`cmd disable`/`toggle`),
+    /// reconstructed from the daemon log by `ExpansionStateParser`; nil when
+    /// unknown. Display-only — commands must never branch on this (that is
+    /// exactly what made the old `DaemonState.disabled` unreachable), because
+    /// the reconstruction depends on log shapes that are not a contract.
+    @Published private(set) var expansionsPaused: Bool?
 
     /// Non-nil while a snooze is active; the user has temporarily disabled expansion
     /// and we'll re-enable at this date. Persists across app launches via `Preferences`.
@@ -27,12 +35,23 @@ final class EspansoProcessManager: ObservableObject {
     let espansoPath: String
     private let preferences: Preferences
 
+    /// espanso's daemon log (`<runtime>/espanso.log`) — the only readable
+    /// channel for the paused state. Resolved by the caller from
+    /// `resolveEspansoPaths()`; nil disables tracking.
+    private let logURL: URL?
+
+    private var logParser = ExpansionStateParser()
+    private var logOffset: UInt64 = 0
+    private var pendingLogBytes: [UInt8] = []
+
     /// Pass a custom `espansoPath` for testing; leave nil to auto-locate via
     /// Homebrew / PATH. Pass `preferences` backed by a throwaway suite so tests
-    /// don't share persisted snooze state.
-    init(espansoPath: String? = nil, preferences: Preferences? = nil) {
+    /// don't share persisted snooze state. Pass `logURL` to point the paused-
+    /// state tracker at a specific daemon log (tests use a temp file).
+    init(espansoPath: String? = nil, preferences: Preferences? = nil, logURL: URL? = nil) {
         let path = espansoPath ?? EspansoProcessManager.locateEspanso() ?? ""
         self.espansoPath = path
+        self.logURL = logURL
         // Resolved here rather than as a default argument: default arguments
         // are evaluated outside the actor, and `shared` is main-actor bound.
         self.preferences = preferences ?? .shared
@@ -57,7 +76,8 @@ final class EspansoProcessManager: ObservableObject {
 
     // MARK: - Commands
 
-    /// Refreshes daemon state by running `espanso status` off the main thread.
+    /// Refreshes daemon state by running `espanso status` off the main thread,
+    /// and tails the daemon log for expansion enable/disable transitions.
     // Verified against espanso v2.4.1 output ("espanso is running" / "espanso is
     // not running"). Check if these strings change on upgrade.
     func refresh() async {
@@ -66,16 +86,75 @@ final class EspansoProcessManager: ObservableObject {
         if let end = snoozeUntil, end <= Date() {
             cancelSnooze(reenable: true)
         }
+        readLogTail()
         let output = await run("status")
         let lower = output.lowercased()
         if lower.contains("not running") || lower.contains("stopped") {
             state = .stopped
+            // The worker died, and its in-memory enabled state died with it.
+            expansionsPaused = nil
         } else if lower.contains("running") {
             // "not running" checked above, so this is safe
             state = .running
+            // Catch transitions logged while the status subprocess ran —
+            // including a restarted worker's banner, which resets the state.
+            readLogTail()
         } else {
             state = .unknown
         }
+    }
+
+    // MARK: - Paused-state tracking (daemon log)
+
+    /// Feeds new daemon-log bytes to `logParser`. The first call scans the
+    /// whole file (small — a few MB at most); later calls read from the last
+    /// offset. Runs synchronously on the main actor every poll tick; the
+    /// incremental reads keep that negligible after the first scan.
+    private func readLogTail() {
+        guard let logURL else { return }
+        guard let handle = try? FileHandle(forReadingFrom: logURL) else {
+            // No log file (fresh install, or the runtime dir was purged).
+            // Nothing to know until espanso writes one.
+            resetLogTracking()
+            return
+        }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        if size < logOffset {
+            // Truncated or rotated: earlier bytes are gone. A rescan of what
+            // remains can only see a newer slice of history — a fresh parser
+            // keeps that from being merged into stale state.
+            resetLogTracking()
+        }
+        guard size > logOffset else { return }
+        try? handle.seek(toOffset: logOffset)
+        let data = (try? handle.readDataToEndOfFile()) ?? Data()
+        if !data.isEmpty {
+            logOffset = size
+            applyLogData(data)
+        }
+    }
+
+    private func resetLogTracking() {
+        logOffset = 0
+        pendingLogBytes = []
+        logParser = ExpansionStateParser()
+        expansionsPaused = nil
+    }
+
+    private func applyLogData(_ data: Data) {
+        guard !data.isEmpty else { return }
+        pendingLogBytes.append(contentsOf: data)
+        // Consume only complete lines; a partial trailing line waits for its
+        // newline (the log line is meaningless half-written).
+        while let newline = pendingLogBytes.firstIndex(of: UInt8(0x0A)) {
+            let lineData = Data(pendingLogBytes[..<newline])
+            pendingLogBytes.removeSubrange(...newline)
+            if let line = String(data: lineData, encoding: .utf8) {
+                logParser.consume(line: line)
+            }
+        }
+        expansionsPaused = logParser.paused
     }
 
     /// Turn text expansion on or off (the daemon keeps running).
@@ -254,17 +333,18 @@ final class EspansoProcessManager: ObservableObject {
         return path.isEmpty ? nil : path
     }
 
-    /// Discover espanso's match directory by running `espanso path`.
-    /// Falls back to the known macOS default if the binary is absent, the
-    /// output is unparseable, or the binary doesn't answer within `timeout`.
-    static func resolveMatchDirectory(
+    /// Discover espanso's directories by running `espanso path`. The runtime
+    /// directory carries the daemon log that the paused-state tracker reads.
+    /// Falls back to the known macOS default if espanso is absent, the output
+    /// is unparseable, or the binary doesn't answer within `timeout`.
+    static func resolveEspansoPaths(
         espansoPath: String? = nil,
         timeout: TimeInterval = 3
-    ) async -> URL {
+    ) async -> (match: URL, runtime: URL?) {
         let defaultPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/espanso/match")
 
-        guard let espanso = espansoPath ?? locateEspanso() else { return defaultPath }
+        guard let espanso = espansoPath ?? locateEspanso() else { return (defaultPath, nil) }
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: espanso)
@@ -274,7 +354,7 @@ final class EspansoProcessManager: ObservableObject {
         do {
             try proc.run()
         } catch {
-            return defaultPath
+            return (defaultPath, nil)
         }
         let pid = proc.processIdentifier
 
@@ -304,25 +384,42 @@ final class EspansoProcessManager: ObservableObject {
         // espanso path output (v2.x):
         //   Config:   /Users/jeff/Library/Application Support/espanso
         //   Packages: ...
-        //   Runtime:  ...
+        //   Runtime:  /Users/jeff/Library/Caches/espanso
         //   Data:     ...
         // Prefer a "Match:" line if espanso ever emits one; fall back to Config: + /match.
+        func value(ofKey key: String, in trimmed: String) -> String? {
+            guard trimmed.hasPrefix(key) else { return nil }
+            let v = trimmed.dropFirst(key.count).trimmingCharacters(in: .whitespaces)
+            return v.isEmpty ? nil : v
+        }
+        var matchPath: String?
+        var configPath: String?
+        var runtimePath: String?
         for line in output.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("Match:") {
-                let p = trimmed.dropFirst("Match:".count).trimmingCharacters(in: .whitespaces)
-                if !p.isEmpty { return URL(fileURLWithPath: p) }
-            }
+            if let v = value(ofKey: "Match:", in: trimmed) { matchPath = v }
+            else if let v = value(ofKey: "Config:", in: trimmed) { configPath = v }
+            else if let v = value(ofKey: "Runtime:", in: trimmed) { runtimePath = v }
         }
-        for line in output.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("Config:") {
-                let configPath = trimmed.dropFirst("Config:".count).trimmingCharacters(in: .whitespaces)
-                if !configPath.isEmpty {
-                    return URL(fileURLWithPath: configPath).appendingPathComponent("match")
-                }
-            }
+
+        let match: URL
+        if let matchPath {
+            match = URL(fileURLWithPath: matchPath)
+        } else if let configPath {
+            match = URL(fileURLWithPath: configPath).appendingPathComponent("match")
+        } else {
+            match = defaultPath
         }
-        return defaultPath
+        let runtimeLog = runtimePath.map {
+            URL(fileURLWithPath: $0).appendingPathComponent("espanso.log")
+        }
+        return (match, runtimeLog)
+    }
+
+    static func resolveMatchDirectory(
+        espansoPath: String? = nil,
+        timeout: TimeInterval = 3
+    ) async -> URL {
+        await resolveEspansoPaths(espansoPath: espansoPath, timeout: timeout).match
     }
 }

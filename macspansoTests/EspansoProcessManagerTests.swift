@@ -120,7 +120,8 @@ extension EspansoProcessManagerTests {
 // espanso reports daemon liveness only: `espanso status` prints "espanso is running"
 // whether or not expansion is enabled, and no `espanso cmd` subcommand queries it.
 // Code that branched on a `.disabled` state therefore never took that branch, which
-// made the menu toggle one-way and left an expiring snooze disabled forever.
+// made the menu toggle one-way and left an expiring snooze disabled forever. The
+// paused state is tracked separately from the daemon log — see the extension below.
 
 extension EspansoProcessManagerTests {
 
@@ -212,5 +213,151 @@ extension EspansoProcessManagerTests {
                                             preferences: makeIsolatedPreferences())
         await manager.refresh()
         XCTAssertEqual(manager.state, .stopped)
+    }
+}
+
+// MARK: - Paused-state tracking (daemon log)
+//
+// espanso has no query for the paused state, but its worker logs every
+// expansion transition to the daemon log. These tests feed a real temp file
+// through the same readLogTail path production uses.
+
+extension EspansoProcessManagerTests {
+
+    /// An empty daemon log, as espanso would have it before its first worker
+    /// writes anything.
+    private func makeDaemonLog() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("espanso-daemon-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    private func appendToLog(_ text: String, of url: URL) throws {
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(text.utf8))
+    }
+
+    private func workerBanner(_ pid: Int) -> String {
+        "23:08:25 [worker(\(pid))] [INFO] reading configs from: \"/tmp/espanso\"\n"
+    }
+
+    private func toggleLine(_ pid: Int, enabled: Bool) -> String {
+        "14:41:48 [worker(\(pid))] [INFO] toggled enabled state, is_enabled = \(enabled)\n"
+    }
+
+    func testPausedStateTrackedFromDaemonLog() async throws {
+        let log = makeDaemonLog()
+        let path = try makeFakeEspanso(script: "echo 'espanso is running'")
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+
+        await manager.refresh()
+        XCTAssertNil(manager.expansionsPaused,
+            "an empty log says nothing about expansion state")
+
+        try appendToLog(workerBanner(43185), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, false,
+            "a worker that never toggled starts enabled")
+
+        try appendToLog(toggleLine(43185, enabled: false), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, true)
+
+        try appendToLog(toggleLine(43185, enabled: true), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, false)
+    }
+
+    func testPausedStateResetsWhenDaemonStops() async throws {
+        let log = makeDaemonLog()
+        let flag = FileManager.default.temporaryDirectory
+            .appendingPathComponent("stopped-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: flag) }
+        let path = try makeFakeEspanso(script: """
+        if [ -f \(flag.path) ]; then
+          echo 'espanso is not running'
+        else
+          echo 'espanso is running'
+        fi
+        """)
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+
+        try appendToLog(workerBanner(43185) + toggleLine(43185, enabled: false), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.state, .running)
+        XCTAssertEqual(manager.expansionsPaused, true)
+
+        FileManager.default.createFile(atPath: flag.path, contents: nil)
+        await manager.refresh()
+        XCTAssertEqual(manager.state, .stopped)
+        XCTAssertNil(manager.expansionsPaused,
+            "the paused state belongs to the worker; when the daemon dies it is unknown")
+    }
+
+    func testLogTruncationRescans() async throws {
+        let log = makeDaemonLog()
+        let path = try makeFakeEspanso(script: "echo 'espanso is running'")
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+
+        try appendToLog(workerBanner(43185) + toggleLine(43185, enabled: false), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, true)
+
+        // Simulate espanso truncating or rotating the log down to a fresh
+        // worker banner: the tracker must not merge the old state back in.
+        try Data(workerBanner(99277).utf8).write(to: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, false,
+            "after truncation the log describes a fresh worker — enabled")
+    }
+
+    func testMissingLogKeepsStateUnknownAndRecovers() async throws {
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("absent-\(UUID().uuidString).log")
+        addTeardownBlock { try? FileManager.default.removeItem(at: log) }
+        let path = try makeFakeEspanso(script: "echo 'espanso is running'")
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+
+        await manager.refresh()
+        XCTAssertEqual(manager.state, .running)
+        XCTAssertNil(manager.expansionsPaused,
+            "a log that does not exist must not fabricate state")
+
+        // espanso creates the log when its daemon first starts; the tracker
+        // must pick it up from then on.
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        try appendToLog(workerBanner(43185) + toggleLine(43185, enabled: false), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, true)
+    }
+
+    func testPartialLogLineWaitsForItsNewline() async throws {
+        let log = makeDaemonLog()
+        let path = try makeFakeEspanso(script: "echo 'espanso is running'")
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+
+        // A log that begins with a half-written line: nothing is known yet.
+        try appendToLog("14:41:48 [worker(43185)] [INFO] toggled enabled state, is_enabled = fal", of: log)
+        await manager.refresh()
+        XCTAssertNil(manager.expansionsPaused,
+            "a half-written line must not be consumed")
+
+        try appendToLog("se\n", of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, true)
     }
 }

@@ -46,6 +46,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             .sink { [weak self] _ in self?.buildMenu() }
             .store(in: &cancellables)
 
+        // Same for the paused state: it lands up to one poll tick after the
+        // command that caused it, so the header must follow on its own.
+        processManager.$expansionsPaused
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.buildMenu() }
+            .store(in: &cancellables)
+
         updateChecker.onStateChange = { [weak self] in
             self?.configureIcon()
             self?.buildMenu()
@@ -106,20 +114,32 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func buildMenu() {
         menu.removeAllItems()
 
-        // Header item — shows espanso's status, not macspanso's running state
-        let headerTitle: String
+        // Header item — shows espanso's status, not macspanso's running state.
+        // The paused variant is reconstructed from espanso's daemon log
+        // (display-only: commands below never branch on it).
+        let headerItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        headerItem.isEnabled = false
         if let until = processManager.snoozeUntil {
-            headerTitle = "💤 Snoozed until \(formatSnoozeEnd(until))"
+            headerItem.title = "💤 Snoozed until \(formatSnoozeEnd(until))"
         } else {
             switch processManager.state {
-            case .running:      headerTitle = "● Espanso running"
-            case .stopped:      headerTitle = "✕ Espanso stopped"
-            case .notInstalled: headerTitle = "⚠ Espanso not installed"
-            case .unknown:      headerTitle = "Espanso"
+            case .running where processManager.expansionsPaused == true:
+                // Yellow dotted circle: espanso is alive but not expanding.
+                let attributed = NSMutableAttributedString(
+                    string: "◌ ",
+                    attributes: [.foregroundColor: NSColor.systemYellow])
+                attributed.append(NSAttributedString(string: "Espanso paused"))
+                headerItem.attributedTitle = attributed
+            case .running:
+                headerItem.title = "● Espanso running"
+            case .stopped:
+                headerItem.title = "✕ Espanso stopped"
+            case .notInstalled:
+                headerItem.title = "⚠ Espanso not installed"
+            case .unknown:
+                headerItem.title = "Espanso"
             }
         }
-        let headerItem = NSMenuItem(title: headerTitle, action: nil, keyEquivalent: "")
-        headerItem.isEnabled = false
         menu.addItem(headerItem)
         menu.addItem(.separator())
 

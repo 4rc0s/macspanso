@@ -10,12 +10,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // Resolve the match directory off the main thread (spawns `espanso path`),
-        // then finish setup back on main.
+        // Resolve espanso's directories off the main thread (spawns `espanso path`),
+        // then finish setup back on main. The runtime dir carries the daemon log
+        // the paused-state tracker reads.
         Task { @MainActor in
-            let matchDir = await EspansoProcessManager.resolveMatchDirectory()
-            let store = EspansoConfigStore(matchDirectory: matchDir)
-            let procMgr = EspansoProcessManager()
+            let paths = await EspansoProcessManager.resolveEspansoPaths()
+            let store = EspansoConfigStore(matchDirectory: paths.match)
+            let procMgr = EspansoProcessManager(logURL: paths.runtime)
             let checker = UpdateChecker()
 
             store.load()
