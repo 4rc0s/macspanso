@@ -111,12 +111,27 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// Header text with a colored status glyph. The glyph takes the status
+    /// color; the label stays at the normal text color so the header doesn't
+    /// read as disabled.
+    private func coloredHeader(_ glyph: String, _ color: NSColor, _ label: String) -> NSAttributedString {
+        let attributed = NSMutableAttributedString(
+            string: "\(glyph) ",
+            attributes: [.foregroundColor: color])
+        attributed.append(NSAttributedString(
+            string: label,
+            attributes: [.foregroundColor: NSColor.labelColor]))
+        return attributed
+    }
+
     private func buildMenu() {
         menu.removeAllItems()
 
         // Header item — shows espanso's status, not macspanso's running state.
-        // The paused variant is reconstructed from espanso's daemon log
-        // (display-only: commands below never branch on it).
+        // Colored-glyph attributed titles: a disabled item's plain title is
+        // dimmed grey, but an attributed title renders verbatim. The paused
+        // variant is reconstructed from espanso's daemon log (display-only:
+        // commands below never branch on it).
         let headerItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         headerItem.isEnabled = false
         if let until = processManager.snoozeUntil {
@@ -125,15 +140,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             switch processManager.state {
             case .running where processManager.expansionsPaused == true:
                 // Yellow dotted circle: espanso is alive but not expanding.
-                let attributed = NSMutableAttributedString(
-                    string: "◌ ",
-                    attributes: [.foregroundColor: NSColor.systemYellow])
-                attributed.append(NSAttributedString(string: "Espanso paused"))
-                headerItem.attributedTitle = attributed
+                headerItem.attributedTitle = coloredHeader("◌", .systemYellow, "Espanso paused")
             case .running:
-                headerItem.title = "● Espanso running"
+                headerItem.attributedTitle = coloredHeader("●", .systemGreen, "Espanso running")
             case .stopped:
-                headerItem.title = "✕ Espanso stopped"
+                headerItem.attributedTitle = coloredHeader("✕", .systemRed, "Espanso stopped")
             case .notInstalled:
                 headerItem.title = "⚠ Espanso not installed"
             case .unknown:
