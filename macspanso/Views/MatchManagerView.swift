@@ -100,7 +100,12 @@ struct MatchManagerView: View {
                     .frame(minWidth: 350)
             }
 
-            // External edit banner — floats over the top
+            // External edit banner — floats over the top. Takes priority over
+            // the undo banner below: an external edit is a data-integrity
+            // question (disk and memory disagree) that should block other
+            // actions, while undo is a convenience that can wait. In practice
+            // the two rarely coincide — an external directory change already
+            // clears pendingUndo (see EspansoConfigStore.handleDirectoryChange).
             if let changedURL = store.externallyChangedURL {
                 ExternalEditBanner(
                     filename: changedURL.lastPathComponent,
@@ -108,9 +113,27 @@ struct MatchManagerView: View {
                     onKeep: { store.dismissExternalChangeNotice() }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
+            } else if let pending = store.pendingUndo {
+                UndoDeleteBanner(
+                    label: pending.label,
+                    onUndo: { try? store.undoDelete() },
+                    onDismiss: { store.dismissPendingUndo() }
+                )
+                // Keyed to this delete's id: .task(id:) cancels and restarts
+                // automatically when a new delete replaces pendingUndo, so a
+                // second delete before the first's timer fires gets its own
+                // fresh window rather than being cut short by the first one's.
+                .task(id: pending.id) {
+                    try? await Task.sleep(for: .seconds(7))
+                    if store.pendingUndo?.id == pending.id {
+                        store.dismissPendingUndo()
+                    }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.2), value: store.externallyChangedURL != nil)
+        .animation(.easeInOut(duration: 0.2), value: store.pendingUndo?.id)
     }
 
     // MARK: - Editor panel
@@ -264,13 +287,12 @@ private struct BulkActionPanel: View {
 
     private func deleteAll() {
         let ids = selectedIDs
-        var firstError: String?
-        for id in ids {
-            do { try store.delete(matchID: id) }
-            catch { firstError = firstError ?? error.localizedDescription }
-        }
         selectedIDs = []
-        actionError = firstError
+        do {
+            try store.deleteMatches(ids)
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     private func moveAll(to url: URL) {

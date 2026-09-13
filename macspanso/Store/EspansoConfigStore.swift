@@ -10,6 +10,36 @@ final class EspansoConfigStore: ObservableObject {
     /// Set to nil after the user responds to the reload banner.
     @Published var externallyChangedURL: URL? = nil
 
+    /// Snapshot of the most recent `deleteMatches` call, kept only long enough
+    /// for the user to undo it. Single-level by design: a new delete replaces
+    /// this rather than stacking, and any other mutating call clears it — see
+    /// the `pendingUndo = nil` at the top of every method but `deleteMatches`/
+    /// `delete(matchID:)` (which replace it) and `undoDelete` (which clears it
+    /// only on success). A deeper undo stack would need every entry's indices
+    /// re-validated against however many intervening edits happened, which is
+    /// not worth the complexity for an accidental-delete safety net.
+    struct PendingDelete: Identifiable {
+        struct Entry {
+            let url: URL
+            let match: EspansoMatch
+            /// Position within that file's `matches` at the moment of deletion —
+            /// where `undoDelete` reinserts it, clamped if the file has since
+            /// shrunk.
+            let originalIndex: Int
+        }
+        let id = UUID()
+        let entries: [Entry]
+        /// Precomputed for the banner: "Deleted "trigger"" for one match,
+        /// "Deleted N matches" for a batch.
+        let label: String
+    }
+
+    // Not private(set): matches externallyChangedURL below — mutated only by
+    // the store's own methods by convention, and tests construct one directly
+    // to exercise undoDelete's clamping/skip behavior against a state no
+    // real code path can currently produce.
+    @Published var pendingUndo: PendingDelete? = nil
+
     let matchDirectory: URL
     private let watcher = FileWatcher()
 
@@ -47,6 +77,7 @@ final class EspansoConfigStore: ObservableObject {
     // MARK: - Load
 
     func load() {
+        pendingUndo = nil   // matchFiles is being wholly rebuilt from disk; any captured indices are meaningless
         watcher.stopAll()   // clear stale watches if load() is called more than once
         let urls = scanMatchDirectory()
         matchFiles = urls.map { loadFile(at: $0) }
@@ -165,8 +196,22 @@ final class EspansoConfigStore: ObservableObject {
         try body()
     }
 
+    /// How a group's file is removed when the user deletes it outright.
+    /// Production moves it to the real macOS Trash — recoverable via Finder's
+    /// Put Back, and needs no retention/cleanup policy of our own, unlike a
+    /// custom soft-delete scheme would. Overridable so tests never touch the
+    /// user's actual Trash; they substitute a plain `removeItem`. Internal
+    /// rollback of a destination file `deleteFile` created and must undo on
+    /// its own failure does NOT go through this seam — that's never
+    /// user-facing deletion, and trashing it would litter the user's Trash
+    /// with the app's own artifacts.
+    var trashHandler: (URL) throws -> Void = { url in
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+
     /// Update a single match in place.
     func update(_ match: EspansoMatch) throws {
+        pendingUndo = nil
         for i in matchFiles.indices {
             if let j = matchFiles[i].matches.firstIndex(where: { $0.id == match.id }) {
                 let url = matchFiles[i].url
@@ -187,6 +232,7 @@ final class EspansoConfigStore: ObservableObject {
     /// or files that failed to parse (a write would clobber their unmodeled content),
     /// and refuses targets espanso would never load — see `validateWriteTarget`.
     func add(_ match: EspansoMatch, to targetURL: URL? = nil) throws {
+        pendingUndo = nil
         let url = targetURL ?? matchDirectory.appendingPathComponent("base.yml")
         try validateWriteTarget(url, domain: "macspanso.add")
         if let existing = matchFiles.first(where: { $0.url == url }),
@@ -363,6 +409,7 @@ final class EspansoConfigStore: ObservableObject {
     /// Returns the new match so callers can select it.
     @discardableResult
     func duplicate(matchID: UUID) throws -> EspansoMatch {
+        pendingUndo = nil
         for i in matchFiles.indices {
             guard let j = matchFiles[i].matches.firstIndex(where: { $0.id == matchID })
             else { continue }
@@ -420,6 +467,7 @@ final class EspansoConfigStore: ObservableObject {
     /// Refuses to move into package files or files with parse errors, and refuses
     /// targets espanso would never load (see `add(_:to:)`).
     func move(matchID: UUID, to targetURL: URL) throws {
+        pendingUndo = nil
         try validateWriteTarget(targetURL, domain: "macspanso.move")
         // Locate the source file and match
         guard let sourceIndex = matchFiles.firstIndex(where: { f in
@@ -487,21 +535,129 @@ final class EspansoConfigStore: ObservableObject {
         }
     }
 
-    /// Delete a match by ID.
-    func delete(matchID: UUID) throws {
+    /// Delete a batch of matches in at most one write per affected file, and
+    /// capture what was removed into `pendingUndo` so the caller can offer an
+    /// Undo affordance. Replaces the old one-write-per-match loop every bulk
+    /// delete call site used to run.
+    ///
+    /// All-or-nothing across files: if any file's write fails, every file
+    /// already written this call is rewritten back to its pre-delete content
+    /// before the error is rethrown, so a partial batch is never left half
+    /// applied on disk or in memory — the same "either every write agrees, or
+    /// none of them changed" contract `move()`/`deleteFile()` already keep,
+    /// generalized from two files to N.
+    func deleteMatches(_ ids: Set<UUID>) throws {
+        guard !ids.isEmpty else { return }
+
+        // Group hits by index into matchFiles (not by URL) since that's what
+        // gets mutated directly below.
+        var perFileRemovals: [Int: [(index: Int, match: EspansoMatch)]] = [:]
         for i in matchFiles.indices {
-            if let j = matchFiles[i].matches.firstIndex(where: { $0.id == matchID }) {
+            let hits = matchFiles[i].matches.enumerated()
+                .filter { ids.contains($0.element.id) }
+                .map { (index: $0.offset, match: $0.element) }
+            if !hits.isEmpty { perFileRemovals[i] = hits }
+        }
+        guard !perFileRemovals.isEmpty else { return }
+
+        var written: [(index: Int, url: URL, previousMatches: [EspansoMatch])] = []
+        do {
+            // Ascending index order: Dictionary iteration order is unspecified,
+            // and a deterministic write order makes a partial-failure rollback
+            // reproducible rather than dependent on hash-seed luck.
+            for (i, hits) in perFileRemovals.sorted(by: { $0.key < $1.key }) {
                 let url = matchFiles[i].url
-                // Write first; only update in-memory if the write succeeds.
-                var updatedMatches = matchFiles[i].matches
-                updatedMatches.remove(at: j)
+                let removeIndices = Set(hits.map(\.index))
+                let updated = matchFiles[i].matches.enumerated()
+                    .filter { !removeIndices.contains($0.offset) }
+                    .map(\.element)
                 try suppressingWatcherEvents(for: url) {
-                    try YAMLSerializer.write(fileContent(updatedMatches, for: url), to: url)
+                    try YAMLSerializer.write(fileContent(updated, for: url), to: url)
                 }
-                matchFiles[i].matches = updatedMatches
-                return
+                written.append((i, url, matchFiles[i].matches))
+                matchFiles[i].matches = updated
+            }
+        } catch {
+            // Put every file already written this call back the way it was,
+            // so the batch never lands half-deleted.
+            for (i, url, previous) in written {
+                try? suppressingWatcherEvents(for: url) {
+                    try YAMLSerializer.write(fileContent(previous, for: url), to: url)
+                }
+                matchFiles[i].matches = previous
+            }
+            throw error
+        }
+
+        var entries: [PendingDelete.Entry] = []
+        for (i, hits) in perFileRemovals {
+            let url = matchFiles[i].url
+            for hit in hits {
+                entries.append(.init(url: url, match: hit.match, originalIndex: hit.index))
             }
         }
+        let label = entries.count == 1
+            ? "Deleted “\(entries[0].match.primaryTrigger)”"
+            : "Deleted \(entries.count) matches"
+        pendingUndo = PendingDelete(entries: entries, label: label)
+    }
+
+    /// Delete a single match by ID. Thin wrapper over `deleteMatches` so this
+    /// call site (and its test) keep working unchanged, and gain undo capture
+    /// for free.
+    func delete(matchID: UUID) throws {
+        try deleteMatches([matchID])
+    }
+
+    /// Reverses the most recent `deleteMatches` call. No-op if there is
+    /// nothing pending. Reinserts each match at its recorded index, clamped to
+    /// the file's current length in case something else has shrunk it since
+    /// the delete — this must never crash on an out-of-range index. A file
+    /// that has vanished entirely since the delete (renamed or removed) is
+    /// skipped rather than failing the whole undo, so what's still
+    /// restorable still gets restored.
+    func undoDelete() throws {
+        guard let pending = pendingUndo else { return }
+
+        // Grouped by URL, each file's entries kept in ascending original-index
+        // order so inserting an earlier one doesn't shift a later target.
+        var byURL: [URL: [PendingDelete.Entry]] = [:]
+        for entry in pending.entries {
+            byURL[entry.url, default: []].append(entry)
+        }
+
+        var written: [(index: Int, url: URL, previousMatches: [EspansoMatch])] = []
+        do {
+            // Ascending path order, for the same determinism reason as deleteMatches.
+            for (url, entries) in byURL.sorted(by: { $0.key.path < $1.key.path }) {
+                guard let i = matchFiles.firstIndex(where: { $0.url == url }) else { continue }
+                var updated = matchFiles[i].matches
+                for entry in entries.sorted(by: { $0.originalIndex < $1.originalIndex }) {
+                    let insertAt = min(entry.originalIndex, updated.count)
+                    updated.insert(entry.match, at: insertAt)
+                }
+                try suppressingWatcherEvents(for: url) {
+                    try YAMLSerializer.write(fileContent(updated, for: url), to: url)
+                }
+                written.append((i, url, matchFiles[i].matches))
+                matchFiles[i].matches = updated
+            }
+        } catch {
+            for (i, url, previous) in written {
+                try? suppressingWatcherEvents(for: url) {
+                    try YAMLSerializer.write(fileContent(previous, for: url), to: url)
+                }
+                matchFiles[i].matches = previous
+            }
+            throw error
+        }
+
+        pendingUndo = nil
+    }
+
+    /// Dismisses the pending-undo banner without applying it.
+    func dismissPendingUndo() {
+        pendingUndo = nil
     }
 
     /// Rename the file backing a group — a group is a file, so renaming a
@@ -514,6 +670,7 @@ final class EspansoConfigStore: ObservableObject {
     /// case-insensitive), except a case-only change of the same file, which
     /// is a true rename and is allowed.
     func renameFile(at url: URL, to name: String) throws {
+        pendingUndo = nil
         guard let index = matchFiles.firstIndex(where: { $0.url == url }) else {
             throw NSError(domain: "macspanso.rename", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "Group not found."])
@@ -579,6 +736,7 @@ final class EspansoConfigStore: ObservableObject {
     /// files; a file that failed to parse may only be deleted outright — its
     /// contents are unreadable, so they cannot be moved anywhere.
     func deleteFile(at url: URL, movingMatchesTo targetURL: URL? = nil) throws {
+        pendingUndo = nil
         guard Self.matchExtensions.contains(url.pathExtension) else {
             throw NSError(domain: "macspanso.deleteGroup", code: 1,
                           userInfo: [NSLocalizedDescriptionKey:
@@ -619,7 +777,7 @@ final class EspansoConfigStore: ObservableObject {
                     try YAMLSerializer.write(fileContent(destMatches, for: target), to: target)
                 }
                 try suppressingWatcherEvents(for: url) {
-                    try FileManager.default.removeItem(atPath: url.path)
+                    try trashHandler(url)
                 }
             } catch {
                 // Removal failed after the destination write: put the destination
@@ -648,7 +806,7 @@ final class EspansoConfigStore: ObservableObject {
             }
         } else {
             try suppressingWatcherEvents(for: url) {
-                try FileManager.default.removeItem(atPath: url.path)
+                try trashHandler(url)
             }
         }
 
@@ -681,6 +839,7 @@ final class EspansoConfigStore: ObservableObject {
     /// Called when the match directory (or a subdirectory) changes — a file or
     /// folder added or removed externally. Silently syncs matchFiles with disk.
     private func handleDirectoryChange() {
+        pendingUndo = nil   // an external add/remove of files invalidates any recorded index
         // Newly created subdirectories need their own watch.
         scanSubdirectories().forEach { watcher.watch(url: $0) }
 
@@ -708,6 +867,7 @@ final class EspansoConfigStore: ObservableObject {
 
     /// Called when the user chooses "Reload" in the external edit banner.
     func reloadFile(at url: URL) {
+        pendingUndo = nil
         guard let index = matchFiles.firstIndex(where: { $0.url == url }) else {
             // The file went away between the banner appearing and Reload being
             // pressed (deleted externally, or by deleteFile). There is nothing
