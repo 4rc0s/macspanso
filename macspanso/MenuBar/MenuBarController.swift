@@ -13,6 +13,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var windowController: MatchManagerWindowController?
     private let backupManager: BackupManager
     private let updateChecker: UpdateChecker
+    private let globalHotkeys = GlobalHotkeyController()
     private var didCreateSessionSnapshot = false
 
     private static let espansoURL = URL(string: "https://espanso.org")!
@@ -49,6 +50,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             self?.configureIcon()
             self?.buildMenu()
         }
+
+        // System-wide: summon the manager (or a new-match draft) from any app.
+        globalHotkeys.install(
+            onOpenManager: { [weak self] in self?.showMatchManager(focus: .none) },
+            onNewMatch:    { [weak self] in self?.showMatchManager(focus: .newMatch) })
     }
 
     /// Rebuild just before the menu opens so the snapshot list and
@@ -109,13 +115,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         } else {
             let openItem = NSMenuItem(title: "Open Match Manager…",
                                       action: #selector(openMatchManager), keyEquivalent: "m")
-            openItem.keyEquivalentModifierMask = [.command]
+            openItem.keyEquivalentModifierMask = [.control, .shift]
             openItem.target = self
             menu.addItem(openItem)
 
             let newItem = NSMenuItem(title: "New Match…",
                                      action: #selector(newMatch), keyEquivalent: "n")
-            newItem.keyEquivalentModifierMask = [.command]
+            newItem.keyEquivalentModifierMask = [.control, .shift]
             newItem.target = self
             menu.addItem(newItem)
 
