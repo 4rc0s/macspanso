@@ -31,8 +31,9 @@ public struct EspansoMatch: Identifiable, Codable, Equatable {
 
     /// YAML keys on this match that macspanso doesn't model (markdown, html,
     /// image_path, paragraph, …), preserved verbatim so editing never destroys them.
-    /// The authoritative key list is espanso's own schemas/match.schema.json, which
-    /// sets additionalProperties: false — check it before assuming a key exists.
+    /// The authoritative key list is espanso's own schemas/match.schema.json on the
+    /// `dev` branch (main and master 404), which sets additionalProperties: false —
+    /// check it before assuming a key exists.
     public var extras: [String: YAMLAny] = [:]
 
     public init(

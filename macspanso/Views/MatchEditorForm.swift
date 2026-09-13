@@ -473,19 +473,28 @@ struct MatchEditorForm: View {
                     set: { draft.rightWord = $0 ? true : nil }
                 ))
 
-                Picker("Capitalisation", selection: optionalChoiceBinding(\.uppercaseStyle)) {
-                    Text("Default").tag("")
-                    Text("Capitalize").tag("capitalize")
-                    Text("Capitalize Words").tag("capitalize_words")
-                    Text("UPPERCASE").tag("uppercase")
-                }
+                choicePicker("Capitalisation", key: \.uppercaseStyle, options: [
+                    ChoiceOption(id: "capitalize",       title: "Capitalize"),
+                    ChoiceOption(id: "capitalize_words", title: "Capitalize Words"),
+                    ChoiceOption(id: "uppercase",        title: "UPPERCASE"),
+                ])
                 .help("Used with Propagate case to decide how a capitalised trigger is echoed.")
 
-                Picker("Injection", selection: optionalChoiceBinding(\.forceMode)) {
-                    Text("Default").tag("")
-                    Text("Clipboard").tag("clipboard")
-                    Text("Keystrokes").tag("keys")
+                // espanso itself warns about this combination and pops its
+                // troubleshooting window: "specifying the 'uppercase_style' option
+                // without 'propagate_case' has no effect". Say so before the file is
+                // written rather than letting espanso complain afterwards.
+                if draft.uppercaseStyle != nil && draft.propagateCase != true {
+                    Label("Capitalisation has no effect unless Propagate case is on",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
+
+                choicePicker("Injection", key: \.forceMode, options: [
+                    ChoiceOption(id: "clipboard", title: "Clipboard"),
+                    ChoiceOption(id: "keys",      title: "Keystrokes"),
+                ])
                 .help("Clipboard pastes the replacement in one go — the fix for long or multi-line text in slow apps.")
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -526,6 +535,30 @@ struct MatchEditorForm: View {
         )
     }
 
+    struct ChoiceOption: Identifiable {
+        let id: String      // the espanso value, e.g. "capitalize_words"
+        let title: String
+    }
+
+    /// A picker over espanso's documented values that also tolerates one it doesn't
+    /// know. `uppercase_style` and `force_mode` are stored as String precisely so a
+    /// value espanso adds later survives a round trip; without a matching tag the
+    /// Picker would render blank and log a tag-mismatch warning, so the file would
+    /// look empty while still holding a value. Show the raw value instead.
+    private func choicePicker(
+        _ title: String,
+        key: WritableKeyPath<EspansoMatch, String?>,
+        options: [ChoiceOption]
+    ) -> some View {
+        let current = draft[keyPath: key] ?? ""
+        let isUnrecognised = !current.isEmpty && !options.contains { $0.id == current }
+        return Picker(title, selection: optionalChoiceBinding(key)) {
+            Text("Default").tag("")
+            ForEach(options) { Text($0.title).tag($0.id) }
+            if isUnrecognised { Text(current).tag(current) }
+        }
+    }
+
     /// Pickers can't select nil, so "Default" is the empty tag and maps back to nil.
     private func optionalChoiceBinding(
         _ key: WritableKeyPath<EspansoMatch, String?>
@@ -535,7 +568,6 @@ struct MatchEditorForm: View {
             set: { draft[keyPath: key] = $0.isEmpty ? nil : $0 }
         )
     }
-
 
     // MARK: - Helpers
 
@@ -618,7 +650,6 @@ struct MatchEditorForm: View {
         }
     }
 }
-
 
 // MARK: - Section header styling
 

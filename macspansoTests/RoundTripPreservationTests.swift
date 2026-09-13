@@ -211,7 +211,8 @@ extension RoundTripPreservationTests {
 
 // MARK: - Newly modelled espanso keys
 //
-// The authoritative key list is espanso's schemas/match.schema.json, which sets
+// The authoritative key list is espanso's schemas/match.schema.json on the `dev`
+// branch (main and master 404), which sets
 // additionalProperties: false. A property added to EspansoMatch without a matching
 // CodingKeys case is decoded *and* copied into extras, so it gets written twice —
 // `testKnownKeysNotDuplicatedIntoExtras` and the extras check below guard that.
