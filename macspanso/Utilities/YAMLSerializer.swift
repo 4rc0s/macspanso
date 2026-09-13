@@ -113,7 +113,10 @@ public enum YAMLSerializer {
         do {
             reread = try decodeContent(yaml: yaml)
         } catch {
-            throw fail("the YAML it produced could not be parsed back")
+            // Only reachable if our own encoder emitted something unparseable —
+            // i.e. a Yams regression. Carry the decode error so that diagnosis
+            // doesn't require reproducing it.
+            throw fail("the YAML it produced could not be parsed back (\(error))")
         }
 
         guard reread.extras == content.extras else {

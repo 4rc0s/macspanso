@@ -359,3 +359,49 @@ extension RoundTripPreservationTests {
             "a refused write must leave the previous contents exactly as they were")
     }
 }
+
+// MARK: - Write verification: block scalars and other awkward shapes
+
+extension RoundTripPreservationTests {
+
+    /// Multi-line strings are the highest-risk round trip after ambiguous scalars:
+    /// YAML block scalars carry a chomping indicator (`|`, `|-`, `|+`) that decides
+    /// whether trailing newlines survive. Get it wrong and the replacement the user
+    /// typed silently gains or loses a newline. espanso replacements are routinely
+    /// multi-line, so this is a real shape, not a contrived one.
+    func testVerificationAcceptsMultiLineAndNonASCII() throws {
+        let noTrailing  = "line one\nline two\nline three"
+        let oneTrailing = "signature\nblock\n"
+        let twoTrailing = "padded\n\n"
+        let onlyNewline = "\n"
+
+        let matches = [
+            EspansoMatch(trigger: "::a", replace: noTrailing),
+            EspansoMatch(trigger: "::b", replace: oneTrailing),
+            EspansoMatch(trigger: "::c", replace: twoTrailing),
+            EspansoMatch(trigger: "::d", replace: onlyNewline),
+            EspansoMatch(trigger: "::e", replace: "héllo wörld — em dash, emoji 🎉, tab\there"),
+            EspansoMatch(trigger: "::f", replace: "date-like 2024-01-01 and time 12:30:00"),
+            EspansoMatch(trigger: "::g", replace: "  leading and trailing spaces  "),
+            EspansoMatch(
+                trigger: "::h", replace: "{{out}}",
+                vars: [EspansoVar(name: "out", type: .shell,
+                                  params: ["cmd": .string("echo one\necho two\n")])]),
+        ]
+        let url = try tempDir("verify-multiline").appendingPathComponent("base.yml")
+
+        try YAMLSerializer.write(matches, to: url)
+
+        // Verification passing is the headline, but assert the payloads explicitly —
+        // a chomping bug would change the string, not the structure.
+        let back = try YAMLSerializer.decode(contentsOf: url)
+        XCTAssertEqual(back.count, matches.count)
+        XCTAssertEqual(back[0].replace, noTrailing)
+        XCTAssertEqual(back[1].replace, oneTrailing, "one trailing newline must survive")
+        XCTAssertEqual(back[2].replace, twoTrailing, "two trailing newlines must survive")
+        XCTAssertEqual(back[3].replace, onlyNewline, "a lone newline must survive")
+        XCTAssertEqual(back[4].replace, matches[4].replace)
+        XCTAssertEqual(back[6].replace, matches[6].replace, "surrounding spaces must survive")
+        XCTAssertEqual(back[7].vars?.first?.params?["cmd"], .string("echo one\necho two\n"))
+    }
+}
