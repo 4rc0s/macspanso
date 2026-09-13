@@ -28,8 +28,15 @@ jobs:
           xcodebuild build \
             -scheme macspanso \
             -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macspanso-app
+          path: build/DerivedData/Build/Products/Debug/macspanso.app
 
       - name: Test
         run: |
