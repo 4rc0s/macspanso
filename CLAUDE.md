@@ -12,8 +12,8 @@ The Xcode project is **generated** — `project.yml` is the source of truth, and
 
 ```bash
 xcodegen generate          # required after adding/removing/renaming any source file
-xcodebuild build -scheme macspanso -destination 'platform=macOS'
-xcodebuild test  -scheme macspanso -destination 'platform=macOS'
+xcodebuild build -scheme macspanso -destination 'platform=macOS' -derivedDataPath build/DerivedData
+xcodebuild test  -scheme macspanso -destination 'platform=macOS' -derivedDataPath build/DerivedData
 ```
 
 `project.yml` globs `macspanso/` and `macspansoTests/` wholesale, so new files need no project edit — but a build without `xcodegen generate` will not see them and will fail with confusing "cannot find type" errors.
@@ -35,7 +35,7 @@ Version lives in `project.yml` (`CFBundleShortVersionString` / `CFBundleVersion`
 
 ### Data flow
 
-`AppDelegate` → resolves the match directory by shelling out to `espanso path` → builds `EspansoConfigStore`, `EspansoProcessManager`, `UpdateChecker` → hands them to `MenuBarController`, which owns the status item and lazily creates `MatchManagerWindowController`. There is no SwiftUI `WindowGroup`; `macspansoApp` declares an empty `Settings` scene and everything real is AppKit-driven. The app is `LSUIElement`.
+`AppDelegate` → resolves the match directory by shelling out to `espanso path` → builds `EspansoConfigStore`, `EspansoProcessManager`, `UpdateChecker` → hands them to `MenuBarController`, which owns the status item and lazily creates `MatchManagerWindowController`. There is no SwiftUI `WindowGroup`; `macspansoApp` declares only a `Settings` scene (which hosts the real Settings window — see "Menu-bar and window presence") and everything else is AppKit-driven. The app is `LSUIElement`.
 
 `EspansoConfigStore` (`Store/EspansoConfigStore.swift`) is the center of the app — the single `@MainActor` `ObservableObject` that owns all match state. Views take it via `@ObservedObject`. Nearly every non-trivial behavior question is answered in this file.
 
@@ -94,7 +94,7 @@ Both are zips of the match directory. Backups are user-initiated to a chosen pat
 
 ### Preferences, launch at login, hotkeys
 
-`Preferences` (`Store/Preferences.swift`) is the only place that touches `UserDefaults`. Its key strings predate it and are pinned by `PreferencesTests.testKeysAreFrozen` — renaming one orphans every user's stored value. It takes an injectable `UserDefaults`; tests use a throwaway suite so they never share `.standard`. Consumers (`EspansoProcessManager`, `UpdateChecker`) accept an optional `Preferences` and fall back to `.shared` *inside* the init body: a `= .shared` default argument is evaluated outside the main actor and the toolchain flags it.
+`Preferences` (`Store/Preferences.swift`) is the only place that names a `UserDefaults` key; the one `@AppStorage` in the codebase (`MatchListView`'s sort order) binds through `Preferences.Key`. The key strings predate it and are pinned by `PreferencesTests.testKeysAreFrozen` — renaming one orphans every user's stored value. It takes an injectable `UserDefaults`; tests use a throwaway suite so they never share `.standard`. Consumers (`EspansoProcessManager`, `UpdateChecker`) accept an optional `Preferences` and fall back to `.shared` *inside* the init body: a `= .shared` default argument is evaluated outside the main actor and the toolchain flags it.
 
 Two things are deliberately not in `Preferences`:
 
@@ -107,7 +107,7 @@ Two things are deliberately not in `Preferences`:
 
 Focus commands (new match, about) reach SwiftUI through `NotificationCenter` posted one run-loop cycle late, so the view's `.onReceive` is wired up before the notification fires.
 
-The Settings window is the SwiftUI `Settings` scene (`SettingsView`), not a second window controller: that gives ⌘,, toolbar tabs, and frame autosave for free and guarantees one instance. The status menu opens it with `NSApp.activate(ignoringOtherApps: true)` followed by `sendAction(Selector(("showSettingsWindow:")))` — activation first, or an accessory app's window can open behind the frontmost app. It deliberately does not flip the activation policy; only the Match Manager does that. Because a `Settings` scene cannot be handed dependencies, `SettingsView` reaches state through `Preferences.shared`, `LoginItem`, and the package — keep it that way rather than threading the store in.
+The Settings window is the SwiftUI `Settings` scene (`SettingsView`), not a second window controller: that gives ⌘,, toolbar tabs, and frame autosave for free and guarantees one instance. The status menu opens it with `NSApp.activate(ignoringOtherApps: true)` followed by `sendAction(Selector(("showSettingsWindow:")))` — activation first, or an accessory app's window can open behind the frontmost app. It deliberately does not flip the activation policy; only the Match Manager does that. Because a `Settings` scene cannot be handed dependencies, `SettingsView` reaches state through `Preferences.shared`, `LoginItem`, the package, and `(NSApp.delegate as? AppDelegate)?.updateChecker` for the one action that needs it — keep it that way rather than threading the store in.
 
 ## Testing conventions
 

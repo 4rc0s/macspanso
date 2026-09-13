@@ -7,8 +7,9 @@ import KeyboardShortcuts
 /// same window via `showSettingsWindow:` — see `MenuBarController.openSettings`.
 ///
 /// Everything here reaches its state through singletons or system APIs on
-/// purpose: a `Settings` scene can't be handed dependencies, and none of these
-/// controls need app state beyond `Preferences.shared`.
+/// purpose: a `Settings` scene can't be handed dependencies. The one control
+/// that needs an app object (the update-check toggle) goes through
+/// `AppDelegate`, which already exposes the checker.
 struct SettingsView: View {
     var body: some View {
         TabView {
