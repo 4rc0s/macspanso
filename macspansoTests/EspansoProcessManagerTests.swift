@@ -360,4 +360,111 @@ extension EspansoProcessManagerTests {
         await manager.refresh()
         XCTAssertEqual(manager.expansionsPaused, true)
     }
+
+    // MARK: - Command self-verification
+    //
+    // DisableMiddleware logs every request — even no-ops — so a command
+    // macspanso sends must produce an is_enabled line. Absence within the
+    // window means the scraped format drifted; the tracker must degrade to
+    // unknown rather than keep claiming a state it can no longer see.
+
+    func testAcknowledgedCommandIsVerifiedAndKept() async throws {
+        let log = makeDaemonLog()
+        let callLog = makeLogURL()
+        let path = try makeRecordingEspanso(log: callLog)
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+        manager.commandVerificationWindow = 0.3
+
+        try appendToLog(workerBanner(43185), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, false)
+
+        manager.setExpansions(enabled: false)
+        let sent = await waitForCall("cmd disable", in: callLog)
+        XCTAssertTrue(sent)
+
+        // The worker acknowledges: an is_enabled line lands in the log.
+        try appendToLog(toggleLine(43185, enabled: false), of: log)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, true)
+
+        // Well past the window, the verified state must survive — a lapse
+        // would have nilled it.
+        try await Task.sleep(nanoseconds: 500_000_000)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, true,
+            "an acknowledged command must not be treated as drift later")
+    }
+
+    func testUnacknowledgedCommandDegradesToUnknown() async throws {
+        let log = makeDaemonLog()
+        let callLog = makeLogURL()
+        let path = try makeRecordingEspanso(log: callLog)
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+        manager.commandVerificationWindow = 0.3
+
+        try appendToLog(workerBanner(43185), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, false)
+
+        // The command goes out but no is_enabled line follows — exactly what
+        // an espanso upgrade that reworded the log would look like.
+        manager.setExpansions(enabled: false)
+        let sent = await waitForCall("cmd disable", in: callLog)
+        XCTAssertTrue(sent)
+
+        try await Task.sleep(nanoseconds: 600_000_000)
+        await manager.refresh()
+        XCTAssertNil(manager.expansionsPaused,
+            "a command the log never acknowledged must degrade the tracker to unknown")
+    }
+
+    func testVerificationDroppedWithoutDriftWhenDaemonStops() async throws {
+        let log = makeDaemonLog()
+        let callLog = makeLogURL()
+        let flag = FileManager.default.temporaryDirectory
+            .appendingPathComponent("stopped-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: flag) }
+        let path = try makeFakeEspanso(script: """
+        echo "$@" >> \(callLog.path)
+        if [ -f \(flag.path) ]; then
+          echo 'espanso is not running'
+        else
+          echo 'espanso is running'
+        fi
+        """)
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+        manager.commandVerificationWindow = 0.3
+
+        try appendToLog(workerBanner(43185), of: log)
+        await manager.refresh()
+
+        manager.setExpansions(enabled: false)
+        let sent = await waitForCall("cmd disable", in: callLog)
+        XCTAssertTrue(sent)
+        FileManager.default.createFile(atPath: flag.path, contents: nil)
+
+        // The daemon dies before any ack; the pending check must be dropped
+        // silently, not reported as drift.
+        try await Task.sleep(nanoseconds: 600_000_000)
+        await manager.refresh()
+        XCTAssertEqual(manager.state, .stopped)
+        XCTAssertNil(manager.expansionsPaused)
+
+        // Daemon returns with a fresh worker: enabled, and still no drift.
+        try FileManager.default.removeItem(at: flag)
+        try appendToLog(workerBanner(99277), of: log)
+        try await Task.sleep(nanoseconds: 600_000_000)
+        await manager.refresh()
+        XCTAssertEqual(manager.state, .running)
+        XCTAssertEqual(manager.expansionsPaused, false,
+            "a restart clears the pending check; the fresh worker reads as enabled")
+    }
 }

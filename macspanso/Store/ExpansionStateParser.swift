@@ -30,15 +30,22 @@ struct ExpansionStateParser {
 
     /// Feed lines in file order. Line-oriented: pass one `\n`-terminated
     /// line per call, without the newline.
-    mutating func consume(line rawLine: String) {
+    ///
+    /// - Returns: whether the line changed the tracked state — a fresh
+    ///   worker's banner or a toggle line from the current worker. Callers
+    ///   use it to self-verify commands: any state change proves the log
+    ///   channel is alive and speaking the expected format.
+    @discardableResult
+    mutating func consume(line rawLine: String) -> Bool {
         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)[...]
-        guard let pid = Self.workerPID(in: line) else { return }
+        guard let pid = Self.workerPID(in: line) else { return false }
 
         if line.contains(Self.workerStartMarker) && pid != currentWorkerPID {
             // A fresh worker process: the engine (and its enabled flag) was
             // just created, so the state is *enabled* regardless of history.
             currentWorkerPID = pid
             paused = false
+            return true
         } else if currentWorkerPID == nil {
             // First worker line in a log that may be truncated mid-session:
             // adopt the PID but stay unknown until a toggle line speaks.
@@ -47,7 +54,9 @@ struct ExpansionStateParser {
 
         if let enabled = Self.toggleValue(in: line), pid == currentWorkerPID {
             paused = !enabled
+            return true
         }
+        return false
     }
 
     /// One-shot convenience: the paused state implied by a whole log.
