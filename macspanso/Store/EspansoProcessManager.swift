@@ -35,6 +35,20 @@ final class EspansoProcessManager: ObservableObject {
     let espansoPath: String
     private let preferences: Preferences
 
+    /// Assigns only on change: `@Published` fires `objectWillChange` even when
+    /// the value is equal, and the poll runs every five seconds — republishing
+    /// an unchanged status re-rendered the whole match window on that cadence,
+    /// and a row click straddling the re-render was silently dropped.
+    private func setDaemonState(_ newValue: DaemonState) {
+        guard state != newValue else { return }
+        state = newValue
+    }
+
+    private func setExpansionsPaused(_ newValue: Bool?) {
+        guard expansionsPaused != newValue else { return }
+        expansionsPaused = newValue
+    }
+
     /// espanso's daemon log (`<runtime>/espanso.log`) — the only readable
     /// channel for the paused state. Resolved by the caller from
     /// `resolveEspansoPaths()`; nil disables tracking.
@@ -102,20 +116,20 @@ final class EspansoProcessManager: ObservableObject {
         let output = await run("status")
         let lower = output.lowercased()
         if lower.contains("not running") || lower.contains("stopped") {
-            state = .stopped
+            setDaemonState(.stopped)
             // The worker died, and its in-memory enabled state — plus any
             // pending self-check — died with it.
-            expansionsPaused = nil
+            setExpansionsPaused(nil)
             pendingExpansionCommand = nil
         } else if lower.contains("running") {
             // "not running" checked above, so this is safe
-            state = .running
+            setDaemonState(.running)
             // Catch transitions logged while the status subprocess ran —
             // including a restarted worker's banner, which resets the state.
             readLogTail()
             resolvePendingCommandVerification()
         } else {
-            state = .unknown
+            setDaemonState(.unknown)
             pendingExpansionCommand = nil
         }
     }
@@ -155,7 +169,7 @@ final class EspansoProcessManager: ObservableObject {
         logOffset = 0
         pendingLogBytes = []
         logParser = ExpansionStateParser()
-        expansionsPaused = nil
+        setExpansionsPaused(nil)
     }
 
     private func applyLogData(_ data: Data) {
@@ -173,7 +187,7 @@ final class EspansoProcessManager: ObservableObject {
                 pendingExpansionCommand = nil
             }
         }
-        expansionsPaused = logParser.paused
+        setExpansionsPaused(logParser.paused)
     }
 
     /// Fires the armed self-check once its window has lapsed without the
@@ -183,7 +197,7 @@ final class EspansoProcessManager: ObservableObject {
         guard Date().timeIntervalSince(sent) > commandVerificationWindow else { return }
         pendingExpansionCommand = nil
         NSLog("macspanso: an expansion command drew no is_enabled line from the daemon log — the scraped format may have drifted; treating the paused state as unknown")
-        expansionsPaused = nil
+        setExpansionsPaused(nil)
     }
 
     /// Turn text expansion on or off (the daemon keeps running).
