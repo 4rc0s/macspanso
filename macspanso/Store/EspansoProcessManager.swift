@@ -44,6 +44,18 @@ final class EspansoProcessManager: ObservableObject {
     private var logOffset: UInt64 = 0
     private var pendingLogBytes: [UInt8] = []
 
+    /// Set when macspanso sends an expansion command; cleared when the log
+    /// shows any state-changing line (every request logs one, even no-ops).
+    /// Lapses to unknown rather than trusting a channel that went quiet.
+    private var pendingExpansionCommand: Date?
+
+    /// How long a command may go unacknowledged by the log before the
+    /// tracker declares the scraped format drifted. Internal so tests can
+    /// shrink it. Generous because the ack crosses daemon → worker
+    /// asynchronously, and a sleeping Mac delays everything — the line still
+    /// lands (the log persists), so sleep merely postpones the verdict.
+    var commandVerificationWindow: TimeInterval = 12
+
     /// Pass a custom `espansoPath` for testing; leave nil to auto-locate via
     /// Homebrew / PATH. Pass `preferences` backed by a throwaway suite so tests
     /// don't share persisted snooze state. Pass `logURL` to point the paused-
@@ -91,16 +103,20 @@ final class EspansoProcessManager: ObservableObject {
         let lower = output.lowercased()
         if lower.contains("not running") || lower.contains("stopped") {
             state = .stopped
-            // The worker died, and its in-memory enabled state died with it.
+            // The worker died, and its in-memory enabled state — plus any
+            // pending self-check — died with it.
             expansionsPaused = nil
+            pendingExpansionCommand = nil
         } else if lower.contains("running") {
             // "not running" checked above, so this is safe
             state = .running
             // Catch transitions logged while the status subprocess ran —
             // including a restarted worker's banner, which resets the state.
             readLogTail()
+            resolvePendingCommandVerification()
         } else {
             state = .unknown
+            pendingExpansionCommand = nil
         }
     }
 
@@ -150,11 +166,24 @@ final class EspansoProcessManager: ObservableObject {
         while let newline = pendingLogBytes.firstIndex(of: UInt8(0x0A)) {
             let lineData = Data(pendingLogBytes[..<newline])
             pendingLogBytes.removeSubrange(...newline)
-            if let line = String(data: lineData, encoding: .utf8) {
-                logParser.consume(line: line)
+            if let line = String(data: lineData, encoding: .utf8),
+               logParser.consume(line: line) {
+                // A state change is proof the channel works and the scraped
+                // format is intact — any pending command self-check passes.
+                pendingExpansionCommand = nil
             }
         }
         expansionsPaused = logParser.paused
+    }
+
+    /// Fires the armed self-check once its window has lapsed without the
+    /// expected log line. Only meaningful while the daemon is running.
+    private func resolvePendingCommandVerification() {
+        guard let sent = pendingExpansionCommand else { return }
+        guard Date().timeIntervalSince(sent) > commandVerificationWindow else { return }
+        pendingExpansionCommand = nil
+        NSLog("macspanso: an expansion command drew no is_enabled line from the daemon log — the scraped format may have drifted; treating the paused state as unknown")
+        expansionsPaused = nil
     }
 
     /// Turn text expansion on or off (the daemon keeps running).
@@ -163,20 +192,26 @@ final class EspansoProcessManager: ObservableObject {
     /// espanso never reports whether expansion is enabled, so a state-driven
     /// toggle always took the same branch and could only ever disable.
     func setExpansions(enabled: Bool) {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await run("cmd", enabled ? "enable" : "disable")
-            await refresh()
-        }
+        sendExpansionCommand(enabled ? "enable" : "disable")
     }
 
     /// Flip expansion without knowing its current state — espanso's own
     /// `cmd toggle` does the flipping, which is the only correct way to express
     /// "toggle" when the state can't be queried.
     func toggleExpansions() {
+        sendExpansionCommand("toggle")
+    }
+
+    /// Sends an expansion command and arms the self-check: DisableMiddleware
+    /// logs *every* request (even no-ops), so within a tick or two the daemon
+    /// log must grow a state-changing line. If none shows up, the scraped
+    /// format has drifted — the tracker degrades to unknown instead of
+    /// trusting whatever it last believed.
+    private func sendExpansionCommand(_ subcommand: String) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await run("cmd", "toggle")
+            pendingExpansionCommand = Date()
+            await run("cmd", subcommand)
             await refresh()
         }
     }
@@ -225,6 +260,7 @@ final class EspansoProcessManager: ObservableObject {
             // Unconditional for the same reason as cancelSnooze: gating on `.running`
             // meant a snooze started before the first poll (state `.unknown`) showed
             // "Snoozed until…" while espanso kept expanding.
+            pendingExpansionCommand = Date()
             await run("cmd", "disable")
             await refresh()
         }
@@ -241,6 +277,7 @@ final class EspansoProcessManager: ObservableObject {
                 // Unconditional: espanso can't tell us whether expansion is off, and
                 // enabling an already-enabled espanso is a no-op. Guarding this on a
                 // state that is never reported is what made snooze one-way.
+                pendingExpansionCommand = Date()
                 await run("cmd", "enable")
                 await refresh()
             }
