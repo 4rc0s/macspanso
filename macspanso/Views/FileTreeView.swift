@@ -17,6 +17,9 @@ struct FileTreeView: View {
     @State private var renameTarget: MatchFile?
     @State private var renameText: String = ""
     @State private var deleteTarget: MatchFile?
+    /// Where ⇧-click extends from — the last row picked without modifiers.
+    @State private var selectionAnchor: UUID?
+    @FocusState private var listFocused: Bool
 
     private var isSearching: Bool { !searchText.isEmpty }
 
@@ -25,30 +28,44 @@ struct FileTreeView: View {
     }
 
     var body: some View {
-        // Hoisted once per render: conflictingFileURLs rebuilds the whole
-        // cross-file conflict map, so reading it inside fileLabel made that
-        // O(files × all matches) on every body evaluation — including every
-        // keystroke in the search field. MatchListView.flatList does the same.
         let conflicted = conflictingFileURLs
-        // Use List(selection:) so rows highlight correctly on macOS.
-        // Package matches get no .tag, preventing them from being selected
-        // (allMatches excludes package files, so the editor panel can't display them).
-        return List(selection: $selectedMatchIDs) {
-            ForEach(visibleGroups) { group in
-                if let folderPath = group.folderPath {
-                    folderSection(group, folderPath: folderPath, conflicted: conflicted)
-                } else {
-                    ForEach(group.files, id: \.id) { file in
-                        Section {
-                            fileBodyRows(file)
-                        } header: {
-                            fileLabel(file, conflicted: conflicted)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(visibleGroups) { group in
+                        if let folderPath = group.folderPath {
+                            folderSection(group, folderPath: folderPath, conflicted: conflicted)
+                        } else {
+                            ForEach(group.files, id: \.id) { file in
+                                fileHeaderRow(file, conflicted: conflicted, indented: false)
+                                fileMatchRows(file, conflicted: conflicted, indented: false)
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
             }
+            .background(
+                // Keyboard focus lives on this invisible anchor rather than on
+                // the scroll view: a focused ScrollView draws a focus ring
+                // around the whole pane, which reads as a stuck highlight.
+                // The anchor itself would draw a ring too (opacity doesn't
+                // suppress it), so it sits pushed out past the window's edge.
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .focusable(true)
+                    .focused($listFocused)
+                    .onMoveCommand { direction in
+                        if let id = MatchListSelection.handleMove(
+                            direction, order: selectableOrder,
+                            anchor: &selectionAnchor, selection: &selectedMatchIDs) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
+                    .offset(x: -200, y: 0)
+            )
         }
-        .listStyle(.sidebar)
         .sheet(item: $renameTarget) { file in
             RenameGroupSheet(name: $renameText) { commitRename(file) } onCancel: {
                 renameTarget = nil
@@ -98,34 +115,59 @@ struct FileTreeView: View {
         isSearching ? file.matches.filter { MatchListView.matchesSearch($0, searchText) } : file.matches
     }
 
+    /// The selectable rows' display order — what ⇧-click ranges and arrow-key
+    /// moves are resolved against.
+    private var selectableOrder: [UUID] {
+        visibleGroups.flatMap { group in
+            group.files.flatMap { file in
+                file.isPackage ? [] : visibleMatches(in: file).map(\.id)
+            }
+        }
+    }
+
     // MARK: - Sections
 
     /// A subdirectory: one collapsible row, its files beneath it.
+    @ViewBuilder
     private func folderSection(
         _ group: EspansoConfigStore.FileGroup,
         folderPath: String,
         conflicted: Set<URL>
     ) -> some View {
-        Section {
-            DisclosureGroup(isExpanded: expansion(for: folderPath)) {
-                ForEach(group.files, id: \.id) { file in
-                    fileLabel(file, conflicted: conflicted)
-                    fileBodyRows(file)
-                }
-            } label: {
-                HStack {
-                    Image(systemName: "folder")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                    Text(folderPath)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Spacer()
-                    Text("\(group.files.reduce(0) { $0 + visibleMatches(in: $1).count })")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+        let expanded = !collapsedFolders.contains(folderPath)
+        Button {
+            if expanded {
+                collapsedFolders.insert(folderPath)
+            } else {
+                collapsedFolders.remove(folderPath)
+            }
+        } label: {
+            HStack {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "folder")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                Text(folderPath)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(group.files.reduce(0) { $0 + visibleMatches(in: $1).count })")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+
+        if expanded {
+            ForEach(group.files, id: \.id) { file in
+                fileHeaderRow(file, conflicted: conflicted, indented: true)
+                fileMatchRows(file, conflicted: conflicted, indented: true)
             }
         }
     }
@@ -133,28 +175,54 @@ struct FileTreeView: View {
     /// Rows for everything beneath a file label: its matches, plus the
     /// placeholder and parse-error states.
     @ViewBuilder
-    private func fileBodyRows(_ file: MatchFile) -> some View {
+    private func fileMatchRows(_ file: MatchFile, conflicted: Set<URL>, indented: Bool) -> some View {
         ForEach(visibleMatches(in: file), id: \.id) { match in
-            matchRow(match, in: file)
+            matchRow(match, in: file, indented: indented)
         }
         if file.matches.isEmpty && file.parseError == nil && !isSearching {
             Text("No matches")
                 .foregroundStyle(.tertiary)
                 .font(.caption)
+                .padding(.leading, indented ? 14 : 0)
+                .padding(.vertical, 3)
         }
         if let error = file.parseError {
             Label("Parse error: \(error)", systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
                 .font(.caption)
+                .padding(.leading, indented ? 14 : 0)
+                .padding(.vertical, 3)
         }
     }
 
-    private func matchRow(_ match: EspansoMatch, in file: MatchFile) -> some View {
-        MatchRowView(match: match)
+    private func matchRow(_ match: EspansoMatch, in file: MatchFile, indented: Bool) -> some View {
+        let selected = selectedMatchIDs.contains(match.id)
+        return MatchRowView(match: match)
             .foregroundStyle(file.isPackage ? .secondary : .primary)
-            // Only non-package matches get a selection tag
-            .ifLet(!file.isPackage) { $0.tag(match.id) }
-            // Package matches can't be moved — no drag either.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, indented ? 14 : 0)
+            .padding(.trailing, 4)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+            )
+            .contentShape(Rectangle())
+            // Clicks ride SwiftUI's gesture machinery — the same path as the
+            // context menu, which never misses. AppKit-level mouseDown
+            // delivery to a background NSView dies after the first click in
+            // this window; modifiers come from NSEvent.modifierFlags, which
+            // tap gestures don't expose.
+            .onTapGesture {
+                guard !file.isPackage else { return }
+                listFocused = true
+                MatchListSelection.handleClick(
+                    MatchListSelection.route(fromModifiers: NSEvent.modifierFlags),
+                    id: match.id, order: selectableOrder,
+                    anchor: &selectionAnchor, selection: &selectedMatchIDs)
+            }
+            // Package matches can't be selected or moved — no drag either.
             .ifLet(!file.isPackage) { view in
                 view.onDrag {
                     NSItemProvider(object: match.id.uuidString as NSString)
@@ -169,8 +237,19 @@ struct FileTreeView: View {
             }
     }
 
-    /// The file's label with its status icons and match count — used both as
-    /// a section header (root files) and as a row (files inside folders).
+    /// The file's label with its status icons and match count — a section
+    /// header in appearance, but an ordinary row view: also the drop target
+    /// for dragging matches between groups. Dropping a match row here moves
+    /// it into this file. Folders are deliberately not drop targets — with
+    /// several files inside, the destination would be ambiguous.
+    private func fileHeaderRow(_ file: MatchFile, conflicted: Set<URL>, indented: Bool) -> some View {
+        fileLabel(file, conflicted: conflicted)
+            .padding(.leading, indented ? 14 : 0)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+    }
+
+    /// The file's label with its status icons and match count.
     /// Also the drop target for dragging matches between groups: dropping a
     /// match row here moves it into this file. Folders are deliberately not
     /// drop targets — with several files inside, the destination would be
@@ -244,21 +323,6 @@ struct FileTreeView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Folder expansion
-
-    private func expansion(for folderPath: String) -> Binding<Bool> {
-        Binding(
-            get: { !collapsedFolders.contains(folderPath) },
-            set: {
-                if $0 {
-                    collapsedFolders.remove(folderPath)
-                } else {
-                    collapsedFolders.insert(folderPath)
-                }
-            }
-        )
     }
 
     // MARK: - Actions
@@ -372,10 +436,20 @@ struct FileTreeView: View {
     }
 }
 
+// MARK: - View helper
+
+private extension View {
+    /// Conditionally applies a modifier. Used to apply .onDrag only to
+    /// selectable (non-package) rows.
+    @ViewBuilder
+    func ifLet(_ condition: Bool, transform: (Self) -> some View) -> some View {
+        if condition { transform(self) } else { self }
+    }
+}
+
 // MARK: - Rename sheet
 
-private struct RenameGroupSheet: View {
-    @Binding var name: String
+private struct RenameGroupSheet: View {    @Binding var name: String
     let onRename: () -> Void
     let onCancel: () -> Void
 
@@ -405,15 +479,5 @@ private struct RenameGroupSheet: View {
         }
         .padding(20)
         .frame(width: 320)
-    }
-}
-
-// MARK: - View helper
-
-private extension View {
-    /// Conditionally applies a modifier. Used to apply .tag only when the condition is true.
-    @ViewBuilder
-    func ifLet(_ condition: Bool, transform: (Self) -> some View) -> some View {
-        if condition { transform(self) } else { self }
     }
 }

@@ -1,5 +1,6 @@
 // macspansoTests/EspansoProcessManagerTests.swift
 import XCTest
+import Combine
 @testable import macspanso
 
 @MainActor
@@ -466,5 +467,72 @@ extension EspansoProcessManagerTests {
         XCTAssertEqual(manager.state, .running)
         XCTAssertEqual(manager.expansionsPaused, false,
             "a restart clears the pending check; the fresh worker reads as enabled")
+    }
+}
+
+// MARK: - Publish discipline
+//
+// The poll runs every five seconds, and `@Published` fires on every
+// assignment — even to an equal value. MatchManagerView observed this object,
+// so an unchanged status re-rendered the whole match window on that cadence,
+// and a row click straddling the re-render was silently dropped. These tests
+// pin the guards: publishing is reserved for real transitions.
+
+extension EspansoProcessManagerTests {
+
+    func testRefreshWithUnchangedStatusDoesNotPublish() async throws {
+        let path = try makeFakeEspanso(script: "echo 'espanso is running'")
+        let manager = EspansoProcessManager(espansoPath: path)
+
+        // The first refresh owns the initial .unknown → .running transition.
+        await manager.refresh()
+
+        var publishes = 0
+        let cancellable = manager.objectWillChange.sink { publishes += 1 }
+        await manager.refresh()
+        await manager.refresh()
+        cancellable.cancel()
+
+        XCTAssertEqual(publishes, 0,
+            "an unchanged status must not publish — every publish re-renders the match list")
+    }
+
+    func testRefreshWithRepeatedlyStoppedStatusPublishesNothingAfterFirst() async throws {
+        let path = try makeFakeEspanso(script: "echo 'espanso is not running'")
+        let manager = EspansoProcessManager(espansoPath: path)
+        await manager.refresh()
+
+        var publishes = 0
+        let cancellable = manager.objectWillChange.sink { publishes += 1 }
+        await manager.refresh()
+        cancellable.cancel()
+
+        XCTAssertEqual(publishes, 0)
+        XCTAssertEqual(manager.state, .stopped)
+    }
+
+    func testLogLineReportingUnchangedPausedStateDoesNotPublish() async throws {
+        // DisableMiddleware logs every request, even a no-op — so the log
+        // regularly grows lines describing the state we already know. New
+        // bytes, but no new state: no publish.
+        let log = makeDaemonLog()
+        let path = try makeFakeEspanso(script: "echo 'espanso is running'")
+        let manager = EspansoProcessManager(espansoPath: path,
+                                            preferences: makeIsolatedPreferences(),
+                                            logURL: log)
+        try appendToLog(workerBanner(43185), of: log)
+        try appendToLog(toggleLine(43185, enabled: false), of: log)
+        await manager.refresh()
+        XCTAssertEqual(manager.expansionsPaused, true)
+
+        var publishes = 0
+        let cancellable = manager.objectWillChange.sink { publishes += 1 }
+        try appendToLog(toggleLine(43185, enabled: false), of: log)
+        await manager.refresh()
+        cancellable.cancel()
+
+        XCTAssertEqual(publishes, 0,
+            "a log line reporting a state we already hold must not publish")
+        XCTAssertEqual(manager.expansionsPaused, true)
     }
 }

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Clicking a match sometimes did nothing** — the match list was SwiftUI's stock `List`, and on macOS 26 its internal row map drifted out of sync with what was on screen: after a few selections, the same visible row selected different matches, group headers committed clicks meant for the row below them, the topmost snippet went dead, and mid-session the rows could vanish from the clickable tree entirely while staying on screen. Arrow keys kept working the whole time, which is what made it feel like the mouse alone had broken. The list is now laid out directly — sections, headers, and rows in plain SwiftUI, with clicks and drags riding the same gesture path as the context menu, so what you click is what you get. Selecting still works exactly as before: click to select, ⌘-click to add or remove, ⇧-click for a range, arrows to walk.
+- **The status poll re-rendered the window for nothing** — every five seconds the poll announced its result even when espanso's state hadn't changed, re-rendering the whole Match Manager on that cadence. It now speaks up only on real transitions, and the match list no longer watches it at all.
+- **A stale selection quietly broke ⌘-clicking** — after an external edit renamed a selected match's trigger, its ID could survive in the selection with no match behind it, leaving the editor on the placeholder and turning the next ⌘-click into a two-selection bulk panel. Selections are now pruned to matches that still exist.
+
 ## [1.8.0] - 2026-09-13
 
 ### Added

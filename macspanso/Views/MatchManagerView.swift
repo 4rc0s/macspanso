@@ -6,7 +6,11 @@ private enum AppTab { case matches, about }
 
 struct MatchManagerView: View {
     @ObservedObject var store: EspansoConfigStore
-    @ObservedObject var processManager: EspansoProcessManager
+    // Deliberately not observed: only AboutView's sheets read the process
+    // manager, and they fetch state on demand. Observing it here re-rendered
+    // the whole window — list, rows, editor — on every real status transition,
+    // and a row click straddling a re-render was silently dropped.
+    let processManager: EspansoProcessManager
 
     @State private var selectedTab: AppTab = .matches
     @State private var selectedMatchIDs: Set<UUID> = []
@@ -47,6 +51,14 @@ struct MatchManagerView: View {
                 isCreatingNew = false
                 selectedMatchIDs = [id]
             }
+        }
+        .onChange(of: store.allMatches.map(\.id)) { liveIDs in
+            // A selection can outlive its match: a reload may fail to re-attach
+            // a match whose trigger was edited externally, and a directory
+            // change may remove its file. A stale ID silently downgrades the
+            // editor to the placeholder and turns the next ⌘-click into a
+            // two-selection bulk panel — drop IDs that no longer exist.
+            selectedMatchIDs.formIntersection(Set(liveIDs))
         }
     }
 

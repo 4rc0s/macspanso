@@ -263,19 +263,76 @@ struct MatchListView: View {
 
     private var flatList: some View {
         let conflicted = conflictedTriggers
-        return List(filteredMatches, id: \.id, selection: $selectedMatchIDs) { match in
-            MatchRowView(match: match, isConflicted: hasConflict(match, in: conflicted))
-                .contextMenu { rowContextMenu(for: match.id) }
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(filteredMatches) { match in
+                        flatRow(match, conflicted: conflicted)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+            }
+            .background(
+                // Keyboard focus lives on this invisible anchor rather than on
+                // the scroll view: a focused ScrollView draws a focus ring
+                // around the whole pane, which reads as a stuck highlight.
+                // The anchor itself would draw a ring too (opacity doesn't
+                // suppress it), so it sits pushed out past the window's edge.
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .focusable(true)
+                    .focused($flatListFocused)
+                    .onMoveCommand { direction in
+                        if let id = MatchListSelection.handleMove(
+                            direction, order: filteredMatches.map(\.id),
+                            anchor: &flatSelectionAnchor, selection: &selectedMatchIDs) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
+                    .offset(x: -200, y: 0)
+            )
+            .background(
+                // Hidden button so ⌘D works even when the row context menu is closed.
+                Button("Duplicate") { duplicateSelected() }
+                    .keyboardShortcut("d", modifiers: .command)
+                    .disabled(singleSelectedMatchID == nil)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+            )
         }
-        .listStyle(.sidebar)
-        .background(
-            // Hidden button so ⌘D works even when the row context menu is closed.
-            Button("Duplicate") { duplicateSelected() }
-                .keyboardShortcut("d", modifiers: .command)
-                .disabled(singleSelectedMatchID == nil)
-                .opacity(0)
-                .frame(width: 0, height: 0)
-        )
+    }
+
+    @State private var flatSelectionAnchor: UUID?
+    @FocusState private var flatListFocused: Bool
+
+    private func flatRow(_ match: EspansoMatch, conflicted: Set<String>) -> some View {
+        let selected = selectedMatchIDs.contains(match.id)
+        return MatchRowView(match: match, isConflicted: hasConflict(match, in: conflicted))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+            )
+            .contentShape(Rectangle())
+            // Clicks ride SwiftUI's gesture machinery — the same path as the
+            // context menu, which never misses. AppKit-level mouseDown
+            // delivery to a background NSView dies after the first click in
+            // this window; modifiers come from NSEvent.modifierFlags, which
+            // tap gestures don't expose.
+            .onTapGesture {
+                flatListFocused = true
+                MatchListSelection.handleClick(
+                    MatchListSelection.route(fromModifiers: NSEvent.modifierFlags),
+                    id: match.id, order: filteredMatches.map(\.id),
+                    anchor: &flatSelectionAnchor, selection: &selectedMatchIDs)
+            }
+            .onDrag {
+                NSItemProvider(object: match.id.uuidString as NSString)
+            }
+            .contextMenu { rowContextMenu(for: match.id) }
     }
 
     @ViewBuilder
