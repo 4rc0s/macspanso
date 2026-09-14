@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-13
+
 ### Added
 - **The menu shows when espanso is paused** — espanso itself cannot be asked whether expansion is on or off, so the header used to say "Espanso running" even when nothing you typed would expand. macspanso now watches espanso's own daemon log, which records every enable, disable, and toggle — including ones made from espanso's tray icon, its keyboard shortcut, or the terminal — and shows **◌ Espanso paused** in yellow while expansion is off. The header's status glyph is now colored the same way elsewhere: a green circle while espanso is expanding, red when it has stopped. As a self-check, every enable, disable, and toggle macspanso sends must show up in that log within moments; when it doesn't, the header quietly falls back to just "running" rather than trusting a state it can no longer see. Snoozing and re-enabling are unchanged: they never needed to read the state to do the right thing.
 - **Matches are grouped by file** — the match list now shows your matches under the file each one lives in, which is espanso's own unit of organisation rather than a category invented by this app: the same grouping is what you see editing the files by hand. Group labels drop the `.yml`, since the extension is espanso's loading rule and not a name you chose, and two groups that would read the same fall back to their folder path. Subfolders collapse into one level you can fold away. The toolbar button on the right switches back to the flat list at any time.
