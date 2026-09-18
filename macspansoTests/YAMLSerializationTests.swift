@@ -19,6 +19,40 @@ final class YAMLSerializationTests: XCTestCase {
         XCTAssertEqual(v.params?["format"], .string("%Y-%m-%d"))
     }
 
+    /// espanso's script extension requires `args` to be a sequence — a plain
+    /// string fails with "missing 'args' parameter" at expansion time. The editor
+    /// writes the space-separated field back as a YAML list; pin the shape.
+    func testRoundTripWithScriptVarArgsAsList() throws {
+        let args = YAMLAny.array([
+            .string("python3"), .string("/path/to/script.py"),
+        ])
+        let match = EspansoMatch(
+            trigger: "::run",
+            replace: "{{out}}",
+            vars: [EspansoVar(name: "out", type: .script, params: ["args": args])]
+        )
+        let yaml = try YAMLSerializer.encode([match])
+        XCTAssertTrue(yaml.contains("- python3"), "args should serialize as a YAML sequence:\n\(yaml)")
+        let decoded = try YAMLSerializer.decode(yaml: yaml)
+        let v = try XCTUnwrap(decoded.first?.vars?.first)
+        XCTAssertEqual(v.params?["args"], args)
+    }
+
+    /// Files written before the editor stored a list keep their legacy string
+    /// `args` intact through a round trip — an existing var must not be rewritten
+    /// just by being opened and saved elsewhere.
+    func testLegacyStringScriptArgsRoundTrip() throws {
+        let match = EspansoMatch(
+            trigger: "::run",
+            replace: "{{out}}",
+            vars: [EspansoVar(name: "out", type: .script, params: ["args": .string("python3 script.py")])]
+        )
+        let yaml = try YAMLSerializer.encode([match])
+        let decoded = try YAMLSerializer.decode(yaml: yaml)
+        let v = try XCTUnwrap(decoded.first?.vars?.first)
+        XCTAssertEqual(v.params?["args"], .string("python3 script.py"))
+    }
+
     func testRoundTripFormMatch() throws {
         let match = EspansoMatch(
             trigger: "::greet",

@@ -4,6 +4,7 @@ import SwiftUI
 struct VariableBuilderView: View {
     @Binding var vars: [EspansoVar]?
     @State private var showTypePicker = false
+    @State private var showHelp = false
     /// Stable row identities parallel to `vars` — index-based ForEach identity
     /// makes SwiftUI reuse row state (focus, text fields) across deletions.
     @State private var entryIDs: [UUID] = []
@@ -12,11 +13,27 @@ struct VariableBuilderView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Variables")
-                .font(.caption)
-                .fontWeight(.semibold)
+            HStack(spacing: 4) {
+                Text("Variables")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                // Reachable with zero variables — help must exist before the
+                // first card does, or a new match has no way to learn the syntax.
+                Button {
+                    showHelp = true
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                        .imageScale(.small)
+                }
+                .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+                .help("Variable quick reference")
+
+                Spacer()
+            }
 
             ForEach(Array(zip(entryIDs, varList.indices)), id: \.0) { _, i in
                 VarCardView(
@@ -48,6 +65,9 @@ struct VariableBuilderView: View {
         }
         .onAppear { syncEntryIDs() }
         .onChange(of: varList.count) { _ in syncEntryIDs() }
+        .sheet(isPresented: $showHelp) {
+            VariableHelpSheet(type: nil)
+        }
         .sheet(isPresented: $showTypePicker) {
             VarTypePickerSheet { type in
                 let existing = Set(varList.map(\.name))
@@ -74,6 +94,14 @@ struct VarCardView: View {
     @Binding var variable: EspansoVar
     let onDelete: () -> Void
 
+    /// Types with no help section: `match` has no espanso extension behind it,
+    /// and an unknown type added after this build has nothing to document.
+    private var hasHelp: Bool {
+        VariableHelpContent.anchor(for: variable.type) != nil
+    }
+
+    @State private var showHelp = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -89,6 +117,18 @@ struct VarCardView: View {
                     .background(Color.accentColor.opacity(0.15))
                     .foregroundStyle(Color.accentColor)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                if hasHelp {
+                    Button {
+                        showHelp = true
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                            .imageScale(.small)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Quick reference for this variable type")
+                }
 
                 Spacer()
 
@@ -107,6 +147,9 @@ struct VarCardView: View {
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+        .sheet(isPresented: $showHelp) {
+            VariableHelpSheet(type: variable.type)
+        }
     }
 
     @ViewBuilder
@@ -117,7 +160,7 @@ struct VarCardView: View {
         case .shell:
             paramTextField(key: "cmd", placeholder: "date +%s", label: "Command")
         case .script:
-            paramTextField(key: "args", placeholder: "python3 /path/to/script.py", label: "Args (space-separated)")
+            scriptArgsField
         case .random:
             randomChoicesField
         case .echo:
@@ -140,7 +183,13 @@ struct VarCardView: View {
             .foregroundStyle(.secondary)
     }
 
-    private func paramTextField(key: String, placeholder: String, label: String) -> some View {
+    private func paramTextField(
+        key: String,
+        placeholder: String,
+        label: String,
+        displayValue: ((YAMLAny) -> String?)? = nil,
+        storeValue: ((String) -> YAMLAny)? = nil
+    ) -> some View {
         HStack {
             Text(label)
                 .font(.caption)
@@ -148,11 +197,13 @@ struct VarCardView: View {
                 .frame(width: 80, alignment: .trailing)
             TextField(placeholder, text: Binding(
                 get: {
-                    variable.params?[key]?.stringValue ?? ""
+                    guard let param = variable.params?[key] else { return "" }
+                    if let displayValue, let shown = displayValue(param) { return shown }
+                    return param.stringValue ?? ""
                 },
                 set: { v in
                     if variable.params == nil { variable.params = [:] }
-                    variable.params?[key] = .string(v)
+                    variable.params?[key] = storeValue?(v) ?? .string(v)
                 }
             ))
             .textFieldStyle(.roundedBorder)
@@ -183,11 +234,40 @@ struct VarCardView: View {
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(.separator))
         }
     }
+
+    /// espanso's script extension requires `args` to be a YAML sequence
+    /// (`Value::Array` in espanso-render's script.rs) — a plain string fails with
+    /// "missing 'args' parameter" at expansion time, so this field reads the list
+    /// (or a legacy string, for files written before the fix) joined with spaces,
+    /// and saves a space-split list. An argument containing spaces can't be
+    /// expressed here; the help sheet says to add those by hand.
+    private var scriptArgsField: some View {
+        paramTextField(
+            key: "args",
+            placeholder: "python3 /path/to/script.py",
+            label: "Args (space-separated)",
+            displayValue: { param in
+                switch param {
+                case .array(let items):
+                    return items.compactMap(\.stringValue).joined(separator: " ")
+                case .string(let s):
+                    return s
+                default:
+                    return nil
+                }
+            },
+            storeValue: { text in
+                .array(text.split(separator: " ", omittingEmptySubsequences: true)
+                    .map { .string(String($0)) })
+            }
+        )
+    }
 }
 
 struct VarTypePickerSheet: View {
     let onSelect: (VarType) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var helpType: VarType?
 
     private let descriptions: [VarType: String] = [
         .date:      "Current date/time with a strftime format",
@@ -210,28 +290,48 @@ struct VarTypePickerSheet: View {
             Divider()
 
             ForEach(VarType.known, id: \.self) { type in
-                Button {
-                    onSelect(type)
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(type.rawValue)
-                                .font(.body)
-                                .fontWeight(.medium)
-                            Text(descriptions[type] ?? "")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                HStack(spacing: 0) {
+                    Button {
+                        onSelect(type)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(type.rawValue)
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                                Text(descriptions[type] ?? "")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.tertiary)
+                                .imageScale(.small)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(.tertiary)
-                            .imageScale(.small)
+                        .padding(.leading, 16)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+
+                    // Read the type's reference before committing to it — a
+                    // sibling of the selection button, not nested inside it,
+                    // so the clicks can't be confused. Hidden for types with
+                    // no help section (`match` has no espanso extension).
+                    if VariableHelpContent.anchor(for: type) != nil {
+                        Button {
+                            helpType = type
+                        } label: {
+                            Image(systemName: "questionmark.circle")
+                                .foregroundStyle(.secondary)
+                                .imageScale(.small)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
                 .background(Color.primary.opacity(0.05))
                 Divider()
             }
@@ -241,5 +341,15 @@ struct VarTypePickerSheet: View {
                 .padding(16)
         }
         .frame(width: 320, height: 520)
+        .popover(
+            isPresented: Binding(
+                get: { helpType != nil },
+                set: { if !$0 { helpType = nil } }
+            ),
+            arrowEdge: .trailing
+        ) {
+            VariableHelpWebView(type: helpType)
+                .frame(width: 560, height: 480)
+        }
     }
 }

@@ -177,6 +177,8 @@ XCTest, `@testable import macspanso`. Classes that touch the actor-isolated type
 ## Notes
 
 - `CHANGELOG.md` entries are user-facing prose: bolded symptom, em dash, then what went wrong and what changed. Match that register rather than listing commits.
+- `VariableHelpContent` (`Support/VariableHelpContent.swift`) is the bundled offline quick reference, reachable from three places: a ? beside the Variables section header (visible with zero variables — help must exist before the first card does), a ? per row of the type-picker sheet (popover; hidden for `match`), and a ? per var card (`VariableHelpSheet`, the codebase's only WKWebView — the picker reuses the bare `VariableHelpWebView` in a popover). Its `documentedTypes` deliberately omits `.match` — espanso has no such extension (nothing named `match.rs` in `espanso-render/src/extension/`), so there is nothing authoritative to document even though the type picker offers it. Adding a `VarType` case fails `VariableHelpContentTests` until a help section is decided, and `.unknown` never gets a button.
+- The var card's script `args` field must save a YAML **sequence**, not a string: espanso's script extension pattern-matches `Value::Array` and errors with "missing 'args' parameter" otherwise, so the field reads a list (or a legacy string) joined with spaces and writes a space-split array — the same read-modify-write shape as the `random` choices field. Pinned by `YAMLSerializationTests`.
 - This is a fork (`4rc0s/macspanso`); upstream is `jeffcaldwellca/macspanso`. Release DMGs come from upstream — this fork's CI produces ad-hoc-signed artifacts only.
 
 ## Upstream-owned files — do not bump

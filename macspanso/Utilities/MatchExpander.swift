@@ -73,27 +73,77 @@ public enum MatchExpander {
         v.params?[key]?.stringValue
     }
 
+    /// ICU equivalents for the strftime tokens espanso accepts. espanso renders
+    /// dates with chrono, whose dialect matches C's strftime in the common codes
+    /// and extends it (`%F`, `%-d`, `%:z`); this map and the date table in
+    /// `VariableHelpContent` must agree — every code the help sheet documents
+    /// has to render in the preview, or the preview shows raw text where the
+    /// snippet would produce a date, which is the one direction the user cannot
+    /// check against a running espanso.
+    ///
+    /// Tokens chrono defines but ICU cannot express faithfully — the
+    /// week-numbering family (`%U %W %V %G %g`, whose week-start rules differ),
+    /// century (`%C`), and sub-second fractions (`%f` and friends) — are
+    /// deliberately left to the literal pass-through below: a visible raw code
+    /// invites a correction, a plausible wrong number smuggles one in. Tokens
+    /// chrono itself rejects (a typo like `%J`) also pass through, surfacing
+    /// the mistake the same way the expansion's failure does.
     private static let strftimeToICU: [Character: String] = [
         "Y": "yyyy", "y": "yy",
-        "m": "MM", "B": "MMMM", "b": "MMM",
-        "d": "dd", "e": "d",
-        "H": "HH", "I": "hh",
+        "m": "MM", "B": "MMMM", "b": "MMM", "h": "MMM",
+        "d": "dd", "e": "d", "j": "DDD", "q": "Q",
+        "H": "HH", "k": "HH", "I": "hh", "l": "h",
         "M": "mm", "S": "ss",
         "A": "EEEE", "a": "EEE",
         "p": "a", "P": "a",
+        // Composite date/time codes, expanded to their ICU spellings.
+        "F": "yyyy-MM-dd", "T": "HH:mm:ss",
+        "D": "MM/dd/yy", "R": "HH:mm",
+        // chrono's %Z prints only the offset (it knows no zone names), so all
+        // three zone tokens reduce to the numeric offset.
+        "z": "Z", "Z": "Z",
+    ]
+
+    /// No-padding variants for chrono's `%-x` modifier — ICU spells these with
+    /// single letters. `%0x` is chrono's default padding (the base map above);
+    /// `%_x` asks for space padding, which ICU cannot express, so it is
+    /// approximated with the base map's zero padding.
+    private static let strftimeNoPadToICU: [Character: String] = [
+        "Y": "y", "y": "y", "m": "M", "d": "d", "e": "d", "j": "D",
+        "H": "H", "k": "H", "I": "h", "l": "h", "M": "m", "S": "s",
+    ]
+
+    /// Locale-composition tokens ask for the locale's own rendering ("locale's
+    /// date representation"), which ICU expresses through formatter styles
+    /// rather than patterns — and which cannot ride inside a larger ICU
+    /// pattern, so each one splits the format into a separate run.
+    private static let strftimeLocaleStyles: [Character: (DateFormatter.Style, DateFormatter.Style)] = [
+        "x": (.short, .none),    // locale's date
+        "X": (.none, .medium),   // locale's time
+        "r": (.none, .medium),   // locale's 12-hour clock time
+        "c": (.medium, .medium), // locale's date and time
     ]
 
     /// Convert the most common strftime tokens espanso accepts into an ICU
     /// pattern for `DateFormatter`. Literal text is single-quoted so letters
     /// like "days" aren't interpreted as ICU pattern characters; `%%` is a
-    /// literal percent; unknown `%x` tokens pass through as literals, matching
-    /// espanso's behavior.
+    /// literal percent; tokens with no faithful ICU equivalent pass through as
+    /// literals rather than render something espanso wouldn't.
     private static func formatDate(strftimePattern: String) -> String {
-        var pattern = ""
+        var assembled = ""
+        var icu = ""
         var literal = ""
-        func flushLiteral() {
-            guard !literal.isEmpty else { return }
-            pattern += "'" + literal.replacingOccurrences(of: "'", with: "''") + "'"
+
+        func flushRun() {
+            guard !icu.isEmpty || !literal.isEmpty else { return }
+            var pattern = icu
+            if !literal.isEmpty {
+                pattern += "'" + literal.replacingOccurrences(of: "'", with: "''") + "'"
+            }
+            let f = DateFormatter()
+            f.dateFormat = pattern
+            assembled += f.string(from: Date())
+            icu = ""
             literal = ""
         }
 
@@ -103,26 +153,70 @@ public enum MatchExpander {
             let next = strftimePattern.index(after: i)
             if ch == "%", next < strftimePattern.endIndex {
                 let token = strftimePattern[next]
+                let after = strftimePattern.index(after: next)
+
+                func flushLiteral() {
+                    guard !literal.isEmpty else { return }
+                    icu += "'" + literal.replacingOccurrences(of: "'", with: "''") + "'"
+                    literal = ""
+                }
+
                 if token == "%" {
                     literal.append("%")
-                } else if let icu = strftimeToICU[token] {
+                    i = after
+                } else if token == "s" {
+                    flushRun()
+                    assembled += String(Int(Date().timeIntervalSince1970))
+                    i = after
+                } else if token == "+" {
+                    // chrono's %+ is RFC 3339 / ISO 8601, exactly.
                     flushLiteral()
-                    pattern += icu
+                    icu += "yyyy-MM-dd'T'HH:mm:ssXXX"
+                    i = after
+                } else if token == ":", after < strftimePattern.endIndex,
+                          strftimePattern[after] == "z" {
+                    flushLiteral()
+                    icu += "XXX" // ±HH:MM
+                    i = strftimePattern.index(after: after)
+                } else if token == "-" || token == "_" || token == "0",
+                          after < strftimePattern.endIndex,
+                          strftimePattern[after] != "%" {
+                    let base = strftimePattern[after]
+                    if token == "-", let noPad = strftimeNoPadToICU[base] {
+                        flushLiteral()
+                        icu += noPad
+                    } else if let padded = strftimeToICU[base] {
+                        flushLiteral()
+                        icu += padded
+                    } else {
+                        literal.append("%")
+                        literal.append(token)
+                        literal.append(base)
+                    }
+                    i = strftimePattern.index(after: after)
+                } else if let icuToken = strftimeToICU[token] {
+                    flushLiteral()
+                    icu += icuToken
+                    i = after
+                } else if let styles = strftimeLocaleStyles[token] {
+                    flushRun()
+                    let f = DateFormatter()
+                    f.dateStyle = styles.0
+                    f.timeStyle = styles.1
+                    assembled += f.string(from: Date())
+                    i = after
                 } else {
                     literal.append("%")
                     literal.append(token)
+                    i = after
                 }
-                i = strftimePattern.index(after: next)
             } else {
                 literal.append(ch)
                 i = next
             }
         }
-        flushLiteral()
-
-        let f = DateFormatter()
-        f.dateFormat = pattern
-        return f.string(from: Date())
+        flushRun()
+        return assembled
     }
 
     private static func expandFormPlaceholders(_ template: String) -> String {

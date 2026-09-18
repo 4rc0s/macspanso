@@ -101,6 +101,62 @@ extension MatchExpanderTests {
         let expected = f.string(from: Date())
         XCTAssertEqual(MatchExpander.preview(of: dateMatch(format: "%Y-%m-%d")), expected)
     }
+
+    /// Every composite token the help table documents must render — a preview
+    /// showing the raw code where espanso would produce a date is the lie in
+    /// the direction the user cannot check. `%x` is the locale's date.
+    func testDateFormatLocaleCompositeRenders() {
+        let preview = MatchExpander.preview(of: dateMatch(format: "%x"))
+        XCTAssertFalse(preview.contains("%"),
+            "documented token %x must render, not pass through raw (got '\(preview)')")
+    }
+
+    func testDateFormatISOCompositeRenders() {
+        let preview = MatchExpander.preview(of: dateMatch(format: "%F"))
+        let year = Calendar.current.component(.year, from: Date())
+        XCTAssertTrue(preview.hasPrefix("\(year)-"),
+            "%F must render as %Y-%m-%d (got '\(preview)')")
+    }
+
+    func testDateFormatTimeCompositeRenders() {
+        let preview = MatchExpander.preview(of: dateMatch(format: "%T"))
+        XCTAssertEqual(preview.count, 8)
+        XCTAssertEqual(preview.split(separator: ":").count, 3)
+    }
+
+    func testDateFormatNoPadModifierRenders() {
+        let preview = MatchExpander.preview(of: dateMatch(format: "%-d"))
+        let day = Calendar.current.component(.day, from: Date())
+        XCTAssertEqual(preview, "\(day)")
+    }
+
+    func testDateFormatUnknownTokenPassesThroughRaw() {
+        // chrono has no %J; espanso leaves it as literal text, so the preview
+        // must too — surfacing the typo the same way the expansion does.
+        let preview = MatchExpander.preview(of: dateMatch(format: "%J"))
+        XCTAssertEqual(preview, "%J")
+    }
+
+    func testDateFormatWeekNumberFamilyPassesThroughRaw() {
+        // Deliberately not approximated: ICU's week rules differ from chrono's,
+        // and a plausible wrong number is worse than a visible raw code.
+        let preview = MatchExpander.preview(of: dateMatch(format: "%V"))
+        XCTAssertEqual(preview, "%V")
+    }
+
+    func testDateFormatUnixTimestampRenders() {
+        let preview = MatchExpander.preview(of: dateMatch(format: "%s"))
+        XCTAssertNotNil(Int(preview), "%s must render as a unix timestamp")
+    }
+
+    func testDateFormatMixedTokensAndLiterals() {
+        let preview = MatchExpander.preview(of: dateMatch(format: "due %F at %H:%M"))
+        XCTAssertTrue(preview.hasPrefix("due "),
+            "literal text around composite tokens must survive (got '\(preview)')")
+        XCTAssertTrue(preview.contains(" at "),
+            "literal text between tokens must survive (got '\(preview)')")
+        XCTAssertFalse(preview.contains("%"), "no token may pass through raw (got '\(preview)')")
+    }
 }
 
 // MARK: - Interpolation fidelity (mirror espanso's \w+ reference regex)
