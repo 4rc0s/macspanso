@@ -62,9 +62,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // System-wide: summon the manager (or a new-match draft) from any app.
         // Key-down rather than key-up keeps the press-to-fire feel of the
         // original Carbon registration. Combos are defined in Shortcuts.swift
-        // and changed by the user in Settings → Shortcuts.
+        // and changed by the user in Settings → Shortcuts. The summon combo
+        // toggles: a second press while the manager is frontmost dismisses it.
         KeyboardShortcuts.onKeyDown(for: .openManager) { [weak self] in
-            self?.showMatchManager(focus: .none)
+            self?.toggleMatchManager()
         }
         KeyboardShortcuts.onKeyDown(for: .newMatch) { [weak self] in
             self?.showMatchManager(focus: .newMatch)
@@ -261,6 +262,44 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func openMatchManager() {
         showMatchManager(focus: .none)
+    }
+
+    /// Pure decision core of `toggleMatchManager`, kept free of AppKit state
+    /// so the summon/dismiss matrix can be unit-tested without real windows.
+    /// Dismiss only when the manager window is actually frontmost: an open but
+    /// backgrounded window should be summoned forward first (the Spotlight /
+    /// Raycast summon convention), never dismissed by a press aimed at it.
+    nonisolated static func shouldDismiss(appIsActive: Bool,
+                                          windowIsVisible: Bool,
+                                          isKeyOrMain: Bool) -> Bool {
+        appIsActive && windowIsVisible && isKeyOrMain
+    }
+
+    /// Second invocation of the summon shortcut dismisses the window.
+    var isMatchManagerFocused: Bool {
+        guard let window = windowController?.window else { return false }
+        // An attached sheet makes the sheet — not the panel — the key window,
+        // so the panel is still "frontmost" for dismissal purposes; fall back
+        // to mainWindow for the same reason.
+        let isKeyOrMain = window.isKeyWindow
+            || window.attachedSheet != nil
+            || NSApp.mainWindow === window
+        return Self.shouldDismiss(
+            appIsActive: NSApp.isActive,
+            windowIsVisible: window.isVisible,
+            isKeyOrMain: isKeyOrMain)
+    }
+
+    func toggleMatchManager() {
+        if isMatchManagerFocused {
+            dismissMatchManager()
+        } else {
+            showMatchManager(focus: .none)
+        }
+    }
+
+    func dismissMatchManager() {
+        windowController?.window?.close()
     }
 
     @objc private func newMatch() {
