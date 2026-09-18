@@ -6,8 +6,25 @@ import Foundation
 /// they show a `[shell: cmd]` placeholder so the user understands what would run without
 /// the editor side-effecting the system on every keystroke. Form placeholders `[[name]]`
 /// render as `[name]` to indicate they would prompt the user.
+///
+/// `match` vars resolve their `trigger` param against `allMatches` (the matches as
+/// saved on disk, not the draft being edited) and render the target recursively.
+/// Fidelity note: with duplicate triggers across files, espanso's winner depends
+/// on its config load order; this approximation takes the first match in store
+/// order, and package matches are included like espanso's own resolution.
 public enum MatchExpander {
-    public static func preview(of match: EspansoMatch) -> String {
+    public static func preview(of match: EspansoMatch, in allMatches: [EspansoMatch] = []) -> String {
+        // Seeding the visited set with the edited match's own id makes a
+        // self-referencing var stop at the first nested hop instead of
+        // recursing on the draft's saved twin.
+        expand(match, in: allMatches, visiting: [match.id])
+    }
+
+    private static func expand(
+        _ match: EspansoMatch,
+        in allMatches: [EspansoMatch],
+        visiting: Set<UUID>
+    ) -> String {
         let template = match.replace ?? match.form ?? ""
         var output = template
 
@@ -22,7 +39,7 @@ public enum MatchExpander {
             guard let v = declaredVars.first(where: { $0.name == m.1 }) else {
                 return String(m.0)
             }
-            return resolve(v)
+            return resolve(v, in: allMatches, visiting: visiting)
         }
 
         if match.form != nil {
@@ -32,7 +49,11 @@ public enum MatchExpander {
         return output
     }
 
-    private static func resolve(_ v: EspansoVar) -> String {
+    private static func resolve(
+        _ v: EspansoVar,
+        in allMatches: [EspansoMatch],
+        visiting: Set<UUID>
+    ) -> String {
         switch v.type {
         case .date:
             let fmt = stringParam(v, "format") ?? "%Y-%m-%d"
@@ -55,7 +76,7 @@ public enum MatchExpander {
         case .form:
             return "[form]"
         case .match:
-            return "[match]"
+            return resolveMatchVar(v, in: allMatches, visiting: visiting)
         case .choice:
             // The first offered label, mirroring how `.random` previews a choice.
             if case let .array(values)? = v.params?["values"],
@@ -66,6 +87,43 @@ public enum MatchExpander {
             return "[choice]"
         case .unknown(let raw):
             return "[\(raw)]"
+        }
+    }
+
+    /// espanso's renderer special-cases `type: match` (espanso-render's
+    /// renderer/mod.rs): it renders the template found by the `trigger` param
+    /// recursively — the target's own variables expand too. A regex target
+    /// cannot be named by a trigger, so only `trigger`/`triggers` matches are
+    /// eligible, mirroring espanso.
+    private static func resolveMatchVar(
+        _ v: EspansoVar,
+        in allMatches: [EspansoMatch],
+        visiting: Set<UUID>
+    ) -> String {
+        guard let trigger = stringParam(v, "trigger"), !trigger.isEmpty else {
+            return "[match]"
+        }
+        // An empty list means "no lookup context" (the parameter is defaulted)
+        // rather than a config that genuinely has no matches; keep the plain
+        // placeholder instead of a misleading "not found".
+        guard !allMatches.isEmpty else { return "[match]" }
+        guard let target = nestedMatch(for: trigger, in: allMatches) else {
+            return "[match: \(trigger) not found]"
+        }
+        // espanso recurses with no guard (an aliased cycle fails at expansion
+        // time); the preview degrades visibly instead of hanging the editor.
+        // Per-branch copy: A→B and A→C→B are both legitimate, only A→B→A is a cycle.
+        guard !visiting.contains(target.id) else {
+            return "[match: circular reference]"
+        }
+        return expand(target, in: allMatches, visiting: visiting.union([target.id]))
+    }
+
+    /// With duplicate triggers across files, espanso's winner depends on its
+    /// config load order; "first in store order" is the documented approximation.
+    private static func nestedMatch(for trigger: String, in allMatches: [EspansoMatch]) -> EspansoMatch? {
+        allMatches.first { m in
+            m.trigger == trigger || m.triggers?.contains(trigger) == true
         }
     }
 
@@ -95,7 +153,10 @@ public enum MatchExpander {
         "H": "HH", "k": "HH", "I": "hh", "l": "h",
         "M": "mm", "S": "ss",
         "A": "EEEE", "a": "EEE",
-        "p": "a", "P": "a",
+        "p": "a",
+        // %P is chrono's lowercase am/pm; ICU has one day-period letter with no
+        // case-distinct pair, so it is rendered through a sentinel and
+        // lowercased after formatting (see formatDate).
         // Composite date/time codes, expanded to their ICU spellings.
         "F": "yyyy-MM-dd", "T": "HH:mm:ss",
         "D": "MM/dd/yy", "R": "HH:mm",
@@ -129,6 +190,14 @@ public enum MatchExpander {
     /// like "days" aren't interpreted as ICU pattern characters; `%%` is a
     /// literal percent; tokens with no faithful ICU equivalent pass through as
     /// literals rather than render something espanso wouldn't.
+    /// Sentinel for `%P` (chrono's lowercase am/pm): ICU has one day-period
+    /// pattern letter with no case-distinct pair, so `%P` is emitted as this
+    /// private-use character and replaced with the lowercased day period after
+    /// formatting. A collision with the same character typed as literal text
+    /// is theoretically possible and accepted: U+E000 never occurs in
+    /// ordinary input.
+    private static let lowerDayPeriodSentinel = "\u{E000}"
+
     private static func formatDate(strftimePattern: String) -> String {
         var assembled = ""
         var icu = ""
@@ -194,6 +263,14 @@ public enum MatchExpander {
                         literal.append(base)
                     }
                     i = strftimePattern.index(after: after)
+                } else if token == "P" {
+                    flushLiteral()
+                    // U+E000 is not an ICU pattern letter, so it is emitted as
+                    // literal text with no quoting — self-quoting here could
+                    // collide with the just-flushed literal's own quotes and
+                    // become a literal apostrophe.
+                    icu += lowerDayPeriodSentinel
+                    i = after
                 } else if let icuToken = strftimeToICU[token] {
                     flushLiteral()
                     icu += icuToken
@@ -216,6 +293,15 @@ public enum MatchExpander {
             }
         }
         flushRun()
+        if assembled.contains(lowerDayPeriodSentinel) {
+            let f = DateFormatter()
+            f.dateFormat = "a"
+            // Lowercasing is a no-op in locales whose day-period text is not
+            // case-distinct (e.g. 上午/下午), so this stays locale-safe.
+            assembled = assembled.replacingOccurrences(
+                of: lowerDayPeriodSentinel,
+                with: f.string(from: Date()).lowercased())
+        }
         return assembled
     }
 

@@ -94,8 +94,8 @@ struct VarCardView: View {
     @Binding var variable: EspansoVar
     let onDelete: () -> Void
 
-    /// Types with no help section: `match` has no espanso extension behind it,
-    /// and an unknown type added after this build has nothing to document.
+    /// Types with no help section: an unknown type added after this build has
+    /// nothing to document.
     private var hasHelp: Bool {
         VariableHelpContent.anchor(for: variable.type) != nil
     }
@@ -165,8 +165,10 @@ struct VarCardView: View {
             randomChoicesField
         case .echo:
             paramTextField(key: "echo", placeholder: "static value", label: "Value")
-        case .clipboard, .form, .match:
+        case .clipboard, .form:
             EmptyView()
+        case .match:
+            matchTriggerField
         case .choice, .unknown:
             readOnlyParamsNote
         }
@@ -208,6 +210,17 @@ struct VarCardView: View {
             ))
             .textFieldStyle(.roundedBorder)
             .font(.system(.body, design: .monospaced))
+        }
+    }
+
+    /// The one param a `match` (nested) var takes: the trigger of the match
+    /// whose output to reuse, leading colon included.
+    private var matchTriggerField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            paramTextField(key: "trigger", placeholder: ":one", label: "Trigger")
+            Text("The trigger of the match whose output this variable re-uses.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -317,7 +330,7 @@ struct VarTypePickerSheet: View {
                     // Read the type's reference before committing to it — a
                     // sibling of the selection button, not nested inside it,
                     // so the clicks can't be confused. Hidden for types with
-                    // no help section (`match` has no espanso extension).
+                    // no help section (unknown types added after this build).
                     if VariableHelpContent.anchor(for: type) != nil {
                         Button {
                             helpType = type

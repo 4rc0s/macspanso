@@ -75,6 +75,9 @@ struct MatchEditorForm: View {
             // Form body
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if fileUsesYAMLAnchors {
+                        anchorsNotice
+                    }
                     destinationSection
                     triggerSection
                     replacementSection
@@ -129,6 +132,30 @@ struct MatchEditorForm: View {
     }
 
     // MARK: - Sections
+
+    /// Files carrying a top-level `anchors:` block lose their aliases on the
+    /// next save: Yams resolves aliases at parse time and the store rewrites
+    /// each use site with the anchored body inlined (the `anchors:` block and
+    /// the bodies themselves survive, so espanso's behavior is unchanged, but
+    /// the shared definition is flattened). Say so in the editor, where the
+    /// save happens. The destination is checked too — Save can move the match
+    /// into a different file than the one it came from.
+    private var fileUsesYAMLAnchors: Bool {
+        func usesAnchors(_ url: URL?) -> Bool {
+            guard let url,
+                  let file = store.matchFiles.first(where: { $0.url == url })
+            else { return false }
+            return file.extras["anchors"] != nil
+        }
+        return usesAnchors(currentFileURL) || usesAnchors(resolvedDestination)
+    }
+
+    private var anchorsNotice: some View {
+        Label("This file uses YAML anchors — saving will inline each *alias, duplicating the shared bodies. espanso's behavior is unchanged.",
+              systemImage: "exclamationmark.triangle")
+            .font(.caption)
+            .foregroundStyle(.orange)
+    }
 
     private var destinationSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -483,7 +510,10 @@ struct MatchEditorForm: View {
     }
 
     private var previewSection: some View {
-        let preview = MatchExpander.preview(of: draft)
+        // Package matches are included: espanso's nested-match resolution sees
+        // every loaded template, and `.match` vars can target a package trigger.
+        let preview = MatchExpander.preview(
+            of: draft, in: store.matchFiles.flatMap(\.matches))
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Image(systemName: "eye")

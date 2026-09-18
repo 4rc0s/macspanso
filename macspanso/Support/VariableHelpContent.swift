@@ -6,16 +6,16 @@ import Foundation
 /// documented type; a var card's help button opens it scrolled to that type.
 ///
 /// Content is pinned to espanso v2 (verified against espanso.org's Extensions
-/// page and the espanso-render extension sources). Two things are deliberately
-/// absent: there is no `match` section — espanso has no such extension, so there
-/// is nothing authoritative to document — and the `date` table is chrono's
-/// strftime dialect (what espanso actually uses), not C's.
+/// page and the espanso-render extension sources). The `date` table is chrono's
+/// strftime dialect (what espanso actually uses), not C's. The `match` type is
+/// documented from espanso's Nested Matches docs and the renderer's own
+/// special-case (espanso-render/src/renderer/mod.rs) — unlike the other types
+/// it is implemented in the renderer, not as an extension.
 enum VariableHelpContent {
 
     /// Types with a section in the help document, in document order.
-    /// Deliberately excludes `.match` (no espanso extension behind it).
     static let documentedTypes: [VarType] =
-        [.date, .clipboard, .shell, .script, .random, .form, .echo, .choice]
+        [.date, .clipboard, .shell, .script, .random, .form, .echo, .choice, .match]
 
     /// The HTML fragment id each documented type scrolls to.
     static func anchor(for type: VarType) -> String? {
@@ -85,6 +85,7 @@ enum VariableHelpContent {
         case .form: return formSection
         case .echo: return echoSection
         case .choice: return choiceSection
+        case .match: return matchSection
         default: return ""
         }
     }
@@ -120,6 +121,7 @@ enum VariableHelpContent {
         <tr><td><code>%M</code></td><td>Minute</td><td>07</td></tr>
         <tr><td><code>%S</code></td><td>Second</td><td>09</td></tr>
         <tr><td><code>%p</code></td><td>AM / PM</td><td>PM</td></tr>
+        <tr><td><code>%P</code></td><td>am / pm (lowercase)</td><td>pm</td></tr>
         <tr><td><code>%F</code></td><td>Short date (<code>%Y-%m-%d</code>)</td><td>2026-09-18</td></tr>
         <tr><td><code>%T</code></td><td>Time (<code>%H:%M:%S</code>)</td><td>14:07:09</td></tr>
         <tr><td><code>%x</code></td><td>Locale's date</td><td>09/18/2026</td></tr>
@@ -232,5 +234,25 @@ enum VariableHelpContent {
               values:
                 - label: "Show this"
                   id: "insert this"</pre>
+        """
+
+    private static let matchSection = """
+        <h2 id="var-match">match</h2>
+        <p>Re-uses the output of another match — espanso's "nested matches". The
+        <code>trigger</code> param names the match to run; include the leading
+        colon.</p>
+        <pre>vars:
+              - name: output
+                type: match
+                params:
+                  trigger: ":one"</pre>
+        <p>If <code>:one</code> is defined as <code>replace: nested</code>, firing
+        this match inserts <code>nested</code>. The target is rendered fully — its
+        own variables expand too — so nesting can be chained.</p>
+        <p>The target must exist when the snippet fires, or expansion fails and
+        espanso logs <code>unable to find sub-match</code>.</p>
+        <p class="note">espanso implements nesting in its renderer rather than as
+        an extension; see “Nested Matches” on
+        <a href="https://espanso.org/docs/matches/basics/">espanso.org/docs/matches/basics</a>.</p>
         """
 }
